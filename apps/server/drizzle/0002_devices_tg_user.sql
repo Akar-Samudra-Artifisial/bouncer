@@ -1,0 +1,1 @@
+ALTER TABLE "devices" ADD COLUMN "tg_user_id" bigint;

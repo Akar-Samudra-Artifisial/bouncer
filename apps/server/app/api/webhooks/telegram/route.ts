@@ -3,6 +3,7 @@ import { json, notConfigured, readBodyLimited } from '@/lib/http'
 import { ingestAlert, ingestHttpStatus } from '@/lib/ingest'
 import { parseJson } from '@/lib/payload'
 import { normalizeTelegram } from '@/lib/telegram'
+import { handlePairCommand, parsePairCommand } from '@/lib/tgpair'
 
 /**
  * Telegram Bot API webhook (`setWebhook` with `secret_token`). Telegram sends the token in
@@ -20,6 +21,10 @@ export async function POST(request: Request) {
   if (body === null) return json({ error: 'payload too large' }, 413)
   const update = parseJson(body)
   if (!update) return json({ error: 'body is not a JSON object' }, 400)
+
+  // Private `/pair CODE` from a group admin: approve the glasses, reply via the webhook response.
+  const pair = parsePairCommand(update)
+  if (pair) return json(await handlePairCommand(pair), 200)
 
   const normalized = normalizeTelegram(update)
   if (!normalized.ok) {

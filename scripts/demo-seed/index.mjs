@@ -247,6 +247,7 @@ async function feedSelftest(ids) {
   await actionSelftest(token, ids)
   await aiLabelSelftest(token)
   await voiceSelftest(ADMIN)
+  await telegramPairSelftest(ADMIN)
 
   const audit = await api('GET', '/api/audit?limit=100', { token: ADMIN })
   const events = new Set((audit.body?.entries ?? []).map((e) => e.event))
@@ -266,6 +267,61 @@ async function feedSelftest(ids) {
   const revoke = await api('POST', '/api/admin/devices/revoke', { token: ADMIN, body: { deviceId: paired.deviceId } })
   const revokedRead = await api('GET', '/api/alerts', { token })
   check('revoke device → reads 401', revoke.status === 200 && revokedRead.status === 401, { revoke: revoke.status, read: revokedRead.status })
+}
+
+// ---------------------------------------------------------------------------
+// Pairing via bot DM `/pair CODE` (dry run: DRY_RUN_ADMIN_IDS=70099 is a group admin).
+
+function dm(from, text) {
+  return { update_id: updateId(), message: { message_id: messageId(), from, chat: { id: from.id, type: 'private', first_name: from.first_name }, date: 0, text } }
+}
+
+async function telegramPairSelftest(adminSecret) {
+  const ip = randomIp()
+  const start = await api('POST', '/api/pair/start', { ip })
+  const code = start.body?.code ?? ''
+  const pollSecret = start.body?.pollSecret
+
+  const stranger = await send(dm(users.spammer, `/pair ${code}`))
+  const afterStranger = await api('GET', '/api/pair/status', { token: pollSecret, ip })
+  check(
+    'DM /pair from a non-admin → refused reply, code stays pending',
+    stranger.status === 200 &&
+      stranger.body?.method === 'sendMessage' &&
+      stranger.body?.chat_id === users.spammer.id &&
+      /only admins/i.test(stranger.body?.text ?? '') &&
+      afterStranger.body?.status === 'pending',
+    { reply: stranger.body?.text, status: afterStranger.body?.status },
+  )
+  const inGroup = await send({ update_id: updateId(), message: message(users.owner, `/pair ${code}`) })
+  check('/pair inside the group (not a DM) → ignored', inGroup.status === 200 && inGroup.body?.ignored === true, inGroup)
+  const usage = await send(dm(users.owner, '/pair'))
+  check('DM /pair without a code → usage reply', /6-character code/.test(usage.body?.text ?? ''), usage.body)
+
+  // Lower case with a dash: codes are normalized like the /pair page.
+  const typed = `${code.slice(0, 3).toLowerCase()}-${code.slice(3).toLowerCase()}`
+  const owner = await send(dm(users.owner, `/pair@BouncerDemoBot ${typed}`))
+  const claimed = await api('GET', '/api/pair/status', { token: pollSecret, ip })
+  const feed = await api('GET', '/api/alerts', { token: claimed.body?.token, ip })
+  check(
+    'DM /pair@bot from a group admin → approved, glasses claim a working token',
+    /^Paired/.test(owner.body?.text ?? '') && claimed.body?.status === 'approved' && typeof claimed.body?.token === 'string' && feed.status === 200,
+    { reply: owner.body?.text, status: claimed.body?.status, feed: feed.status },
+  )
+  const reuse = await send(dm(users.owner, `/pair ${code}`))
+  check('same code again → "Pairing failed" reply', /^Pairing failed/.test(reuse.body?.text ?? ''), reuse.body)
+
+  const audit = await api('GET', '/api/audit?limit=100', { token: adminSecret })
+  const entries = audit.body?.entries ?? []
+  const approved = entries.find((e) => e.event === 'pair.approved' && e.detail?.deviceId === claimed.body?.deviceId)
+  check(
+    'audit: pair.approved by telegram:<admin id> with tgUserId, pair.telegram_denied for the stranger',
+    approved?.actor === `telegram:${users.owner.id}` &&
+      approved?.detail?.tgUserId === users.owner.id &&
+      entries.some((e) => e.event === 'pair.telegram_denied' && e.detail?.tgUserId === users.spammer.id),
+    { actor: approved?.actor, tgUserId: approved?.detail?.tgUserId },
+  )
+  if (claimed.body?.deviceId) await api('POST', '/api/admin/devices/revoke', { token: adminSecret, body: { deviceId: claimed.body.deviceId } })
 }
 
 // ---------------------------------------------------------------------------

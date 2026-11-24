@@ -1,6 +1,6 @@
 import type { AlertTarget } from '@bouncer/shared'
 import { sql } from 'drizzle-orm'
-import { bigserial, check, index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
+import { bigint, bigserial, check, index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 
 export const alerts = pgTable(
   'alerts',
@@ -45,6 +45,8 @@ export const devices = pgTable('devices', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  /** Telegram user id of the group admin who paired this device via bot DM `/pair CODE`; null = paired via /pair page. */
+  tgUserId: bigint('tg_user_id', { mode: 'number' }),
 })
 
 export const pairingCodes = pgTable(

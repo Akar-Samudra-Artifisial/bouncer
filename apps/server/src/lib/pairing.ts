@@ -102,11 +102,22 @@ export function normalizeCode(raw: string): string {
   return raw.replace(/[\s-]/g, '').toUpperCase()
 }
 
+/** Who approved: the /pair page admin (default) or a Telegram group admin via bot DM. */
+export interface Approver {
+  actor: string
+  tgUserId?: number
+}
+
 /** Approve a pending, unexpired code and create its device row (token is minted on claim). */
-export async function approvePairing(rawCode: string, rawName: string): Promise<AdminResult> {
+export async function approvePairing(
+  rawCode: string,
+  rawName: string,
+  approver: Approver = { actor: 'admin' },
+): Promise<AdminResult> {
   const code = normalizeCode(rawCode)
   if (!CODE_PATTERN.test(code)) return { ok: false, message: 'code must be 6 characters (A–Z, 2–9)' }
   const name = rawName.trim().slice(0, 60) || 'Even G2'
+  const tgUserId = approver.tgUserId ?? null
 
   const db = getDb()
   const p = schema.pairingCodes
@@ -122,10 +133,13 @@ export async function approvePairing(rawCode: string, rawName: string): Promise<
     const [device] = await tx
       .insert(schema.devices)
       // Placeholder hash of a discarded random value: unusable until the device claims its token.
-      .values({ name, tokenHash: sha256Hex(`unclaimed:${randomSecret()}`) })
+      .values({ name, tokenHash: sha256Hex(`unclaimed:${randomSecret()}`), tgUserId })
       .returning({ id: schema.devices.id })
     await tx.update(p).set({ deviceId: device.id }).where(eq(p.code, code))
-    await audit({ event: 'pair.approved', actor: 'admin', detail: { deviceId: device.id, name } }, tx)
+    await audit(
+      { event: 'pair.approved', actor: approver.actor, detail: { deviceId: device.id, name, ...(tgUserId !== null && { tgUserId }) } },
+      tx,
+    )
     return { ok: true, message: `approved “${name}”; the glasses will pick up the token`, deviceId: device.id }
   })
 }
@@ -151,6 +165,7 @@ export interface DeviceSummary {
   lastSeenAt: string | null
   revokedAt: string | null
   claimed: boolean
+  tgUserId: number | null
 }
 
 export async function listDevices(): Promise<DeviceSummary[]> {
@@ -163,6 +178,7 @@ export async function listDevices(): Promise<DeviceSummary[]> {
       createdAt: d.createdAt,
       lastSeenAt: d.lastSeenAt,
       revokedAt: d.revokedAt,
+      tgUserId: d.tgUserId,
       usedAt: p.usedAt,
     })
     .from(d)
@@ -175,5 +191,6 @@ export async function listDevices(): Promise<DeviceSummary[]> {
     lastSeenAt: r.lastSeenAt?.toISOString() ?? null,
     revokedAt: r.revokedAt?.toISOString() ?? null,
     claimed: r.usedAt !== null,
+    tgUserId: r.tgUserId,
   }))
 }

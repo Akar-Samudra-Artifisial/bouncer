@@ -109,16 +109,21 @@ function describe(alert: AlertForAction, action: ActionKind): Pick<ActionPreview
 
 export type IntentResult = { ok: true; preview: ActionPreview } | { ok: false; status: 403 | 404 | 422 | 429 | 502; error: string }
 
-type MemberCheck = { ok: true; status: MemberStatus } | { ok: false; outcome: ProviderOutcome }
+export type MemberCheck = { ok: true; status: MemberStatus } | { ok: false; outcome: ProviderOutcome }
 
 /** Dry-run getChatMember: user ids in `DRY_RUN_ADMIN_IDS` (csv) are administrators, everyone else a member. */
 function fakeMemberStatus(userId: number): MemberCheck {
   return { ok: true, status: csv('DRY_RUN_ADMIN_IDS').includes(String(userId)) ? 'administrator' : 'member' }
 }
 
+/** getChatMember, or the fake under `ACTIONS_DRY_RUN=1`. */
+export function lookupMember(chatId: number, userId: number): Promise<MemberCheck> {
+  return isDryRun() ? Promise.resolve(fakeMemberStatus(userId)) : telegramMemberStatus(chatId, userId)
+}
+
 /** Chat owners and admins are never moderated from the glasses (fails closed if Telegram cannot answer). */
 async function checkTargetMember(target: TelegramTarget): Promise<{ ok: true } | { ok: false; status: 422 | 502; error: string; detail?: string }> {
-  const member = isDryRun() ? fakeMemberStatus(target.userId) : await telegramMemberStatus(target.chatId, target.userId)
+  const member = await lookupMember(target.chatId, target.userId)
   if (!member.ok) {
     return { ok: false, status: 502, error: `could not check the target member: ${member.outcome.message}`, detail: member.outcome.detail }
   }

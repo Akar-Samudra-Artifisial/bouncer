@@ -32,8 +32,8 @@ export function pairBody(v: PairView): string {
         '',
         `CODE     ${spaced(v.code)}`,
         '',
-        clip(`Open ${v.url}`, LINE),
-        'and enter the code to approve this device.',
+        clip(`Group admin: DM the bot /pair ${v.code}`, LINE),
+        clip(`or enter the code at ${v.url}`, LINE),
         `Waiting for approval · expires in ${minutesLeft(v.expiresAt)}`,
         'Double-tap: exit',
       ].join('\n')
