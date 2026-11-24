@@ -6,7 +6,7 @@ type Executor = Pick<ReturnType<typeof getDb>, 'insert'>
 
 export interface AuditEvent {
   event: string
-  /** `device:<id>`, `admin`, `telegram`, `anonymous`. */
+  /** `device:<id>`, `admin`, `telegram`, `telegram:<userId>`, `cron`, `anonymous`. */
   actor: string
   alertId?: string | null
   detail?: Record<string, unknown>

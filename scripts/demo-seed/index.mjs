@@ -5,7 +5,8 @@
 // Server env needed: TELEGRAM_WEBHOOK_SECRET, TELEGRAM_ALLOWED_CHATS (first id is used here), FLAG_KEYWORDS (must include "airdrop").
 // Action selftest also needs: ACTIONS_DRY_RUN=1, DRY_RUN_ADMIN_IDS=70099, ACTION_NONCE_TTL_SECONDS ≤ 15,
 // a dummy TELEGRAM_BOT_TOKEN (checked for leaks) and DATABASE_URL (local DB, for the foreign-chat alert).
-// AI label + voice selftests also need SUMMARY_AI_MOCK=1 and VOICE_STT_MOCK=1 (dev only).
+// AI label + voice selftests also need SUMMARY_AI_MOCK=1 and VOICE_STT_MOCK=1 (dev only);
+// the purge selftest needs CRON_SECRET.
 
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
@@ -248,6 +249,7 @@ async function feedSelftest(ids) {
   await aiLabelSelftest(token)
   await voiceSelftest(ADMIN)
   await telegramPairSelftest(ADMIN)
+  await purgeSelftest()
 
   const audit = await api('GET', '/api/audit?limit=100', { token: ADMIN })
   const events = new Set((audit.body?.entries ?? []).map((e) => e.event))
@@ -436,12 +438,7 @@ async function flagged(msg) {
 
 /** Alert in a chat outside the allowlist cannot come through the webhook: insert it directly (local DB only). */
 async function insertForeignAlert() {
-  const url = process.env.DATABASE_URL
-  if (!url) return null
-  const require = createRequire(new URL('../../apps/server/package.json', import.meta.url))
-  const { default: postgres } = await import(pathToFileURL(require.resolve('postgres')).href)
-  const sql = postgres(url, { max: 1, onnotice: () => {} })
-  try {
+  return withSql(async (sql) => {
     const mid = messageId()
     const target = { chatId: OTHER_CHAT.id, messageId: mid, userId: users.spammer.id, username: users.spammer.username, chatTitle: OTHER_CHAT.title }
     const [row] = await sql`
@@ -450,9 +447,54 @@ async function insertForeignAlert() {
               '@cheap_followers: foreign chat', 'link — foreign chat', ${OTHER_CHAT.title}, ${sql.json({ selftest: true })}, ${sql.json(target)})
       returning id`
     return row.id
+  })
+}
+
+/** Run `fn(sql)` against the local DB (DATABASE_URL from apps/server/.env.local); null when unset. */
+async function withSql(fn) {
+  const url = process.env.DATABASE_URL
+  if (!url) return null
+  const require = createRequire(new URL('../../apps/server/package.json', import.meta.url))
+  const { default: postgres } = await import(pathToFileURL(require.resolve('postgres')).href)
+  const sql = postgres(url, { max: 1, onnotice: () => {} })
+  try {
+    return await fn(sql)
   } finally {
     await sql.end()
   }
+}
+
+// ---------------------------------------------------------------------------
+// Retention purge (server: CRON_SECRET; alerts older than 7 days are deleted).
+
+async function purgeSelftest() {
+  const cron = process.env.CRON_SECRET
+  const noAuth = await api('GET', '/api/cron/purge')
+  const wrong = await api('GET', '/api/cron/purge', { token: 'wrong-cron-secret' })
+  check('cron purge without / with a wrong secret → 401', noAuth.status === 401 && wrong.status === 401, { none: noAuth.status, wrong: wrong.status })
+  if (!cron) {
+    check('CRON_SECRET set for the purge selftest', false, 'add CRON_SECRET to apps/server/.env.local')
+    return
+  }
+
+  const oldId = await flagged(message(users.anon, 'old airdrop offer'))
+  const freshId = await flagged(message(users.anon, 'fresh airdrop offer'))
+  await withSql((sql) => sql`update alerts set created_at = now() - interval '8 days' where id = ${oldId}`)
+  const run = await api('GET', '/api/cron/purge', { token: cron })
+  const left = await withSql((sql) => sql`select id from alerts where id in (${oldId}, ${freshId})`)
+  const ids = new Set((left ?? []).map((r) => r.id))
+  check(
+    'cron purge → 200, alert older than 7 days deleted, fresh alert kept',
+    run.status === 200 && run.body?.deletedAlerts >= 1 && !ids.has(oldId) && ids.has(freshId),
+    { status: run.status, deletedAlerts: run.body?.deletedAlerts, oldGone: !ids.has(oldId), freshKept: ids.has(freshId) },
+  )
+  const audit = await api('GET', '/api/audit?limit=20', { token: process.env.ADMIN_SECRET })
+  const entry = (audit.body?.entries ?? []).find((e) => e.event === 'retention.purge')
+  check(
+    'audit retention.purge holds counts only (no message text)',
+    entry?.actor === 'cron' && !JSON.stringify(entry.detail).includes('airdrop') && typeof entry.detail.deletedAlerts === 'number',
+    entry?.detail,
+  )
 }
 
 function confirmOf(token, intent, nonce = intent.body?.nonce) {
