@@ -14,7 +14,7 @@ export type VoiceView =
   | { kind: 'heard'; source: VoiceMic; transcript: string; intent: VoiceIntent; next: string }
   | { kind: 'message'; title: string; detail?: string }
 
-const HINT = 'Say: delete · dismiss · next · back · inbox · summary'
+const HINT = 'Say: delete · mute · ban · dismiss · next · back · inbox · summary'
 
 export function voiceBody(v: VoiceView): string {
   switch (v.kind) {

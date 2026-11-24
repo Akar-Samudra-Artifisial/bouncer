@@ -9,7 +9,17 @@ const NEGATION = /\b(don'?t|do not|dont|never|cancel|stop|undo|not)\b/
 /** "no" only negates when it comes before the action verb ("no, don't…", "no delete"); "delete it, no wait" stays delete. */
 const NO_WORD = /\bno\b/
 const DELETE = /\b(delete|remove|erase|take (it|this|that) down)\b/
+const MUTE = /\b(mute|silence|time ?out)\b/
+/** `\b` keeps "banana"/"unban" out; "unban" is not a command here (no undo action). */
+const BAN = /\b(ban|kick (him|her|them|it) out|block)\b/
 const DISMISS = /\b(dismiss|ignore( it| this| that)?|it'?s fine|false alarm|keep (it|this|that))\b/
+/** Write verbs, checked together: more than one in a sentence is ambiguous → unknown. */
+const WRITE_VERBS = [
+  ['delete', DELETE],
+  ['mute', MUTE],
+  ['ban', BAN],
+  ['dismiss', DISMISS],
+] as const
 const SUMMARY = /\b(summary|summari[sz]e|explain|what happened|what'?s (wrong|going on|up)|tl ?dr|details?)\b/
 /** "back to the inbox" is inbox, not back. */
 const INBOX_RETURN = /\b(back|return|go) to (the )?(inbox|home|alert list|list|alerts)\b/
@@ -31,21 +41,23 @@ export function normalizeTranscript(text: string): string {
 }
 
 /**
- * Map a transcript to one intent. Ambiguity (both delete and dismiss), negation of a write
- * action, or a long sentence → `unknown`. Write intents are only returned, never executed.
- * TODO H2: mute/ban phrases.
+ * Map a transcript to one intent. Ambiguity (two different write verbs), negation of a write
+ * action, or a long sentence → `unknown`. Write intents are only returned, never executed:
+ * the glasses open the Confirm screen with Cancel focused.
  */
 export function parseIntent(transcript: string): VoiceIntent {
   const t = normalizeTranscript(transcript)
   if (!t || t.split(' ').length > MAX_COMMAND_WORDS) return 'unknown'
-  const del = DELETE.exec(t)
-  const dismiss = DISMISS.exec(t)
-  const verb = del ?? dismiss
+  const hits = WRITE_VERBS.flatMap(([intent, re]) => {
+    const m = re.exec(t)
+    return m ? [{ intent, index: m.index }] : []
+  })
+  if (hits.length > 1) return 'unknown'
+  const verb = hits[0]
   if (verb) {
-    if (del && dismiss) return 'unknown'
     const no = NO_WORD.exec(t)
     if (NEGATION.test(t) || (no && no.index < verb.index)) return 'unknown'
-    return del ? 'delete' : 'dismiss'
+    return verb.intent
   }
   if (SUMMARY.test(t)) return 'summary'
   if (INBOX_RETURN.test(t)) return 'inbox'

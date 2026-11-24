@@ -246,6 +246,7 @@ async function feedSelftest(ids) {
 
   await actionSelftest(token, ids)
   await aiLabelSelftest(token)
+  await voiceSelftest(ADMIN)
 
   const audit = await api('GET', '/api/audit?limit=100', { token: ADMIN })
   const events = new Set((audit.body?.entries ?? []).map((e) => e.event))
@@ -265,6 +266,55 @@ async function feedSelftest(ids) {
   const revoke = await api('POST', '/api/admin/devices/revoke', { token: ADMIN, body: { deviceId: paired.deviceId } })
   const revokedRead = await api('GET', '/api/alerts', { token })
   check('revoke device → reads 401', revoke.status === 200 && revokedRead.status === 401, { revoke: revoke.status, read: revokedRead.status })
+}
+
+// ---------------------------------------------------------------------------
+// Voice intents (server: VOICE_STT_MOCK=1; `x-mock-transcript` replaces Cartesia STT).
+
+// A function declaration (hoisted), not a const: the top-level `await` above runs the selftest
+// before later consts initialize.
+function voiceCases() {
+  return [
+  ['delete this message', 'delete'],
+  ['take it down', 'delete'],
+  ['mute him', 'mute'],
+  ['give them a time out', 'mute'],
+  ['ban this user', 'ban'],
+  ['kick them out', 'ban'],
+  ['dismiss', 'dismiss'],
+  ["it's fine, false alarm", 'dismiss'],
+  ["don't ban him", 'unknown'],
+  ['no, mute', 'unknown'],
+  ['delete it and ban him', 'unknown'],
+  ['unban', 'unknown'],
+  ['banana pancakes', 'unknown'],
+  ['next', 'next'],
+  ['summarize this', 'summary'],
+  ['back to the inbox', 'inbox'],
+  ]
+}
+
+async function voiceSelftest(adminSecret) {
+  // Own device + IP: the voice quota (20 / 10 min) is per device.
+  const ip = randomIp()
+  const start = await api('POST', '/api/pair/start', { ip })
+  await api('POST', '/api/admin/pair/approve', { token: adminSecret, body: { code: start.body?.code, name: 'selftest voice' }, ip })
+  const status = await api('GET', '/api/pair/status', { token: start.body?.pollSecret, ip })
+  const token = status.body?.token
+  const audio = new Uint8Array(3200) // 0.1 s of silence, PCM s16le 16 kHz
+  const wrong = []
+  const cases = voiceCases()
+  for (const [transcript, expected] of cases) {
+    const res = await fetch(`${SERVER}/api/voice?sampleRate=16000`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'audio/pcm', 'x-mock-transcript': transcript, 'x-forwarded-for': ip },
+      body: audio,
+    })
+    const body = await res.json().catch(() => null)
+    if (res.status !== 200 || body?.intent !== expected) wrong.push({ transcript, expected, status: res.status, got: body?.intent ?? body })
+  }
+  check(`voice parser: ${cases.length} phrases (delete/mute/ban/dismiss, negation, ambiguity)`, wrong.length === 0, wrong)
+  if (status.body?.deviceId) await api('POST', '/api/admin/devices/revoke', { token: adminSecret, body: { deviceId: status.body.deviceId } })
 }
 
 // ---------------------------------------------------------------------------

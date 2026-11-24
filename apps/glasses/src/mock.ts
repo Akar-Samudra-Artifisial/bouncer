@@ -179,8 +179,9 @@ export async function mockVoice(alertId: string): Promise<VoiceResponse> {
   await delay(700)
   const alert = MOCK_ALERTS.find((a) => a.id === alertId)
   const step = MOCK_VOICE_SCRIPT[mockVoiceTurn++ % MOCK_VOICE_SCRIPT.length]
-  // Only delete/dismiss have voice phrases (TODO H2: mute/ban).
-  const action = alert?.actions?.find((a): a is 'delete' | 'dismiss' => a === 'delete' || a === 'dismiss')
+  // Cycle through the alert's actions so every voice verb gets demoed.
+  const actions = alert?.actions ?? []
+  const action = actions.length ? actions[mockVoiceTurn % actions.length] : undefined
   if (step.intent === 'action') {
     // Alerts without an action: the "command" is simply not understood.
     if (!action) return { transcript: 'fix it', intent: 'unknown', alertId }

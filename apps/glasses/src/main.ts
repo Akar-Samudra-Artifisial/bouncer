@@ -724,6 +724,8 @@ function nextAlertId(alertId: string): string | undefined {
 function intentNote(intent: VoiceIntent, alertId: string): string {
   switch (intent) {
     case 'delete':
+    case 'mute':
+    case 'ban':
     case 'dismiss':
       return canRun(alertId, intent) ? `→ ${ACTION_LABEL[intent]}: opening confirm…` : `→ ${ACTION_LABEL[intent]} is not available here`
     case 'next':
@@ -733,7 +735,7 @@ function intentNote(intent: VoiceIntent, alertId: string): string {
     case 'inbox':
       return '→ Opening inbox…'
     case 'summary':
-      return '→ Refreshing summary…'
+      return '→ Refreshing risk label…'
     case 'unknown':
       return "→ Didn't catch that. Back to the alert…"
   }
@@ -749,6 +751,8 @@ function runIntent(token: number, intent: VoiceIntent): void {
   const { alertId } = s
   switch (intent) {
     case 'delete':
+    case 'mute':
+    case 'ban':
     case 'dismiss':
       if (!canRun(alertId, intent)) {
         go({ name: 'detail', alertId })

@@ -157,9 +157,8 @@ export type PairStatusResponse =
 /**
  * What a spoken command maps to. Action intents are NEVER executed by `/api/voice`:
  * the glasses must still call `POST /api/actions/intent` and show the Confirm screen.
- * TODO H3: voice phrases for `mute`/`ban`.
  */
-export const VOICE_INTENTS = ['delete', 'dismiss', 'next', 'back', 'inbox', 'summary', 'unknown'] as const
+export const VOICE_INTENTS = ['delete', 'mute', 'ban', 'dismiss', 'next', 'back', 'inbox', 'summary', 'unknown'] as const
 export type VoiceIntent = (typeof VOICE_INTENTS)[number]
 
 /**
