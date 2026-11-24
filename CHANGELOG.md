@@ -23,12 +23,23 @@ history is not repeated here.
 - Glasses action labels: Delete message / Mute 1h / Ban user / Dismiss; mock mode shows an admin refusal and a provider failure.
 - Selftest covers intent → confirm for every action, admin refusal, chats outside the allowlist, reused/wrong/expired nonces,
   provider failure and bot-token scrubbing.
+- Glasses inbox/detail show Telegram flags (`@username: text`, group name); offline mock data uses fake Telegram messages.
+- Demo seed / selftest sends fake Telegram updates.
+- AI risk label on the Detail screen: `spam | scam | toxic | ok | unclear` plus a reason of at most 200 characters,
+  generated on demand by `claude-haiku-5-5` and cached until the alert status changes. Invalid model output falls back
+  to `unclear` with a heuristic reason; `AI_LABELS=0` turns AI off. The label never changes which actions are offered.
+- Voice commands for every moderation action (delete, mute, ban, dismiss) besides next/back/inbox/summary; a voice
+  command only opens the Confirm screen with Cancel focused, and negated or ambiguous phrases are rejected.
+- Pair glasses from Telegram: a group admin sends `/pair CODE` to the bot in a private chat; the server checks with
+  `getChatMember` that the sender administers an allowlisted group and replies in the chat. The `/pair` page with
+  `ADMIN_SECRET` remains as a fallback.
+- Daily retention purge (`GET /api/cron/purge`, Vercel Cron, `CRON_SECRET`): alerts older than 7 days are deleted
+  with their message text and AI label; the audit entry records counts only.
 
 ### Security
 - The bot token is scrubbed from provider error details (network errors, Telegram `description`) before audit/logging
   and is never part of API responses.
-- Glasses inbox/detail show Telegram flags (`@username: text`, group name); offline mock data uses fake Telegram messages.
-- Demo seed / selftest sends fake Telegram updates.
+- Flagged message text is sent to Anthropic only when a moderator opens the alert, wrapped as untrusted data, without tools.
 
 ### Removed
 - GitHub and Sentry webhooks, providers and actions (`rerun`, `resolve`) inherited from the Pagerline base.
