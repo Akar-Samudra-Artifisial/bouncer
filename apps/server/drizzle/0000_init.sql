@@ -1,8 +1,22 @@
+CREATE TABLE "action_requests" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"alert_id" uuid NOT NULL,
+	"device_id" uuid NOT NULL,
+	"action" text NOT NULL,
+	"nonce_hash" text NOT NULL,
+	"status" text DEFAULT 'pending' NOT NULL,
+	"expires_at" timestamp with time zone NOT NULL,
+	"result" jsonb,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "action_requests_status_ck" CHECK ("action_requests"."status" in ('pending', 'confirmed', 'expired', 'failed', 'succeeded'))
+);
+--> statement-breakpoint
 CREATE TABLE "alerts" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"seq" bigserial NOT NULL,
 	"source" text NOT NULL,
 	"delivery_id" text NOT NULL,
+	"dedup_key" text,
 	"kind" text NOT NULL,
 	"severity" text NOT NULL,
 	"status" text DEFAULT 'open' NOT NULL,
@@ -11,6 +25,9 @@ CREATE TABLE "alerts" (
 	"scope" text,
 	"url" text,
 	"payload" jsonb NOT NULL,
+	"target" jsonb,
+	"ai_summary" text,
+	"ai_summary_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "alerts_seq_unique" UNIQUE("seq")
 );
@@ -39,10 +56,19 @@ CREATE TABLE "pairing_codes" (
 	"device_id" uuid,
 	"expires_at" timestamp with time zone NOT NULL,
 	"used_at" timestamp with time zone,
+	"poll_secret_hash" text,
+	"approved_at" timestamp with time zone,
+	"requester_ip_hash" text,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+ALTER TABLE "action_requests" ADD CONSTRAINT "action_requests_alert_id_alerts_id_fk" FOREIGN KEY ("alert_id") REFERENCES "public"."alerts"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "action_requests" ADD CONSTRAINT "action_requests_device_id_devices_id_fk" FOREIGN KEY ("device_id") REFERENCES "public"."devices"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "audit_log" ADD CONSTRAINT "audit_log_alert_id_alerts_id_fk" FOREIGN KEY ("alert_id") REFERENCES "public"."alerts"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "pairing_codes" ADD CONSTRAINT "pairing_codes_device_id_devices_id_fk" FOREIGN KEY ("device_id") REFERENCES "public"."devices"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "action_requests_device_created_idx" ON "action_requests" USING btree ("device_id","created_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "alerts_source_delivery_uq" ON "alerts" USING btree ("source","delivery_id");--> statement-breakpoint
-CREATE INDEX "audit_log_created_idx" ON "audit_log" USING btree ("created_at");
+CREATE UNIQUE INDEX "alerts_source_dedup_uq" ON "alerts" USING btree ("source","dedup_key");--> statement-breakpoint
+CREATE INDEX "audit_log_created_idx" ON "audit_log" USING btree ("created_at");--> statement-breakpoint
+CREATE UNIQUE INDEX "pairing_codes_poll_secret_uq" ON "pairing_codes" USING btree ("poll_secret_hash");--> statement-breakpoint
+CREATE INDEX "pairing_codes_ip_created_idx" ON "pairing_codes" USING btree ("requester_ip_hash","created_at");

@@ -1,4 +1,4 @@
-import type { Alert, SummarySource } from '@pagerline/shared'
+import type { Alert, SummarySource } from '@bouncer/shared'
 import { TextContainerProperty } from '@evenrealities/even_hub_sdk'
 import { DETAIL_BODY, DETAIL_FOOTER, FOOTER_H, HEADER_H, MAX_TEXT_CHARS, SCREEN_H, SCREEN_W } from '../ids'
 import { ago, clip, sevTag } from './format'
@@ -22,7 +22,7 @@ function summaryLines(s: SummaryView | undefined): string[] {
 
 export function detailBody(a: Alert, summary?: SummaryView): string {
   const lines = [`${sevTag(a)} · ${a.source} · ${a.status} · ${ago(a.createdAt)} ago`, a.title, '', ...summaryLines(summary), '', a.summary]
-  if (a.scope) lines.push('', `Scope: ${a.scope}`)
+  if (a.scope) lines.push('', `Group: ${a.scope}`)
   // Keep line breaks; only enforce the firmware's per-container character limit.
   const text = lines.join('\n')
   return text.length <= MAX_TEXT_CHARS ? text : `${text.slice(0, MAX_TEXT_CHARS - 1)}…`

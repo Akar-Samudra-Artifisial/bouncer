@@ -1,4 +1,4 @@
-import type { SummaryResponse, SummarySource } from '@pagerline/shared'
+import type { SummaryResponse, SummarySource } from '@bouncer/shared'
 import { and, eq } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import { audit } from '@/lib/audit'
@@ -93,7 +93,7 @@ export async function POST(request: Request, ctx: { params: Promise<{ id: string
 
   const result = mock ? { ok: true as const, text: `Mock summary: ${alert.severity} ${alert.source} alert.` } : await generateSummary(alert)
   if (!result.ok) {
-    console.error(`[pagerline] summary ${id} failed: ${result.message}`)
+    console.error(`[bouncer] summary ${id} failed: ${result.message}`)
     return fallback(result.message.slice(0, 80))
   }
 

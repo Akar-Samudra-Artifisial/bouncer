@@ -8,7 +8,7 @@ import type {
   PairStatusResponse,
   SummaryResponse,
   VoiceResponse,
-} from '@pagerline/shared'
+} from '@bouncer/shared'
 import { ApiError } from './errors'
 import {
   MOCK_ALERTS,
@@ -43,7 +43,7 @@ export function isMock(): boolean {
 
 /** Where the user approves a pairing code. */
 export function pairUrl(): string {
-  return isMock() ? 'pagerline.example/pair' : `${API_BASE}/pair`
+  return isMock() ? 'bouncer.example/pair' : `${API_BASE}/pair`
 }
 
 /** A request body that is sent as-is with its own Content-Type (audio uploads). */

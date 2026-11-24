@@ -1,4 +1,4 @@
-import type { ActionKind, ActionPreview, ActionConfirmResult, Alert } from '@pagerline/shared'
+import type { ActionKind, ActionPreview, ActionConfirmResult, Alert } from '@bouncer/shared'
 import { ACTIONS_LIST, CONFIRM_BODY, CONFIRM_LIST, RESULT_BODY, SCREEN_H } from '../ids'
 import { clip } from './format'
 import { BODY_Y, header, LIST_ROW_H, listBox, textBox, type Page } from './layout'
@@ -6,8 +6,10 @@ import { BODY_Y, header, LIST_ROW_H, listBox, textBox, type Page } from './layou
 const LINE = 52
 
 export const ACTION_LABEL: Record<ActionKind, string> = {
-  rerun: 'Re-run failed jobs',
-  resolve: 'Resolve Sentry issue',
+  delete: 'Delete message',
+  mute: 'Mute user 1 hour',
+  ban: 'Ban user',
+  dismiss: 'Dismiss flag',
 }
 
 // ---- actions list: row 0 = Back, rows 1..n = alert.actions ----------------

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-export const metadata = { title: 'Pagerline server' }
+export const metadata = { title: 'Bouncer server' }
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (

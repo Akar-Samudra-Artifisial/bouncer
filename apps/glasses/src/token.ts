@@ -1,6 +1,6 @@
 import type { EvenAppBridge } from '@evenrealities/even_hub_sdk'
 
-const STORAGE_KEY = 'pagerline.deviceToken'
+const STORAGE_KEY = 'bouncer.deviceToken'
 
 /**
  * Resolve the device token at runtime; nothing is baked into the bundle.

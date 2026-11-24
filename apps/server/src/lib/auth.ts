@@ -83,8 +83,8 @@ const MIN_ADMIN_SECRET_LENGTH = 32
 /** HMAC key for IP hashes, derived from ADMIN_SECRET (a fixed dev key outside production). */
 function ipHashKey(): string {
   const admin = process.env.ADMIN_SECRET
-  if (admin && admin.length >= MIN_ADMIN_SECRET_LENGTH) return sha256Hex(`pagerline:ip-hash:v1:${admin}`)
-  if (!isProduction()) return 'pagerline-dev-ip-hash-key'
+  if (admin && admin.length >= MIN_ADMIN_SECRET_LENGTH) return sha256Hex(`bouncer:ip-hash:v1:${admin}`)
+  if (!isProduction()) return 'bouncer-dev-ip-hash-key'
   throw new Error('ADMIN_SECRET (>= 32 chars) must be set to hash client IPs')
 }
 

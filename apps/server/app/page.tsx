@@ -1,11 +1,10 @@
 export default function Home() {
   return (
     <main style={{ fontFamily: 'system-ui', padding: 24 }}>
-      <h1>Pagerline server</h1>
-      <p>Webhook ingest + alert feed for the Pagerline G2 glasses app.</p>
+      <h1>Bouncer server</h1>
+      <p>Telegram group moderation feed for the Bouncer G2 glasses app.</p>
       <ul>
-        <li>POST /api/webhooks/github</li>
-        <li>POST /api/webhooks/sentry</li>
+        <li>POST /api/webhooks/telegram (X-Telegram-Bot-Api-Secret-Token)</li>
         <li>GET /api/alerts?since=&lt;cursor&gt; (Bearer device token)</li>
         <li>POST /api/pair/start · GET /api/pair/status (Bearer poll secret)</li>
         <li>POST /api/actions/intent · POST /api/actions/confirm (Bearer paired device token)</li>

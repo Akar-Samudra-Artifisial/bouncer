@@ -1,4 +1,4 @@
-import type { Alert } from '@pagerline/shared'
+import type { Alert } from '@bouncer/shared'
 import { TextContainerProperty } from '@evenrealities/even_hub_sdk'
 import { HEADER_H, IDLE_BODY, MAX_TEXT_CHARS, SCREEN_H, SCREEN_W } from '../ids'
 import { ago, clip, sevTag } from './format'

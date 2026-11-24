@@ -1,6 +1,6 @@
 import { PairForms } from './pair-forms'
 
-export const metadata = { title: 'Pagerline · pair glasses' }
+export const metadata = { title: 'Bouncer · pair glasses' }
 
 export default function PairPage() {
   return (

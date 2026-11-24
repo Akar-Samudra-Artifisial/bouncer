@@ -1,4 +1,4 @@
-import type { AuditEntry } from '@pagerline/shared'
+import type { AuditEntry } from '@bouncer/shared'
 import { and, desc, eq, lt, or, sql } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 
@@ -6,7 +6,7 @@ type Executor = Pick<ReturnType<typeof getDb>, 'insert'>
 
 export interface AuditEvent {
   event: string
-  /** `device:<id>`, `admin`, `github`, `sentry`, `anonymous`. */
+  /** `device:<id>`, `admin`, `telegram`, `anonymous`. */
   actor: string
   alertId?: string | null
   detail?: Record<string, unknown>

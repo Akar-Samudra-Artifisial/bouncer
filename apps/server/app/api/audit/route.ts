@@ -1,4 +1,4 @@
-import type { AuditResponse } from '@pagerline/shared'
+import type { AuditResponse } from '@bouncer/shared'
 import { listAudit } from '@/lib/audit'
 import { adminDenied, authenticateDevice, verifyAdminRequest } from '@/lib/auth'
 import { corsHeaders, json, preflight } from '@/lib/http'

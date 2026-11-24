@@ -1,4 +1,4 @@
-import type { GithubRunTarget } from '@pagerline/shared'
+import type { TelegramTarget } from '@bouncer/shared'
 import { obj, str } from './payload'
 
 /** Outcome of a provider write. Provider/network errors are data here, never thrown. */
@@ -39,7 +39,8 @@ async function errorDetail(res: Response): Promise<string> {
   return text.slice(0, DETAIL_MAX) || res.statusText || 'request failed'
 }
 
-async function call(url: string, init: RequestInit, label: string): Promise<ProviderOutcome> {
+/** Provider HTTP call with timeout and status → safe message mapping (used by the H2 Bot API wiring). */
+export async function call(url: string, init: RequestInit, label: string): Promise<ProviderOutcome> {
   let res: Response
   try {
     res = await fetch(url, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) })
@@ -51,42 +52,17 @@ async function call(url: string, init: RequestInit, label: string): Promise<Prov
   return { ok: false, status: res.status, message: publicMessage(label, res.status, false), detail: await errorDetail(res) }
 }
 
-export const GITHUB_RERUN_LABEL = 'GitHub rerun-failed-jobs'
-export const SENTRY_RESOLVE_LABEL = 'Sentry resolve'
-
-/** `POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun-failed-jobs` (201 on success). */
-export async function githubRerunFailedJobs(target: GithubRunTarget): Promise<ProviderOutcome> {
-  const token = process.env.GITHUB_ACTIONS_TOKEN
-  if (!token) return { ok: false, status: null, message: publicMessage(GITHUB_RERUN_LABEL, null, false), detail: 'GITHUB_ACTIONS_TOKEN not set' }
-  const [owner, repo] = target.repo.split('/')
-  const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs/${target.runId}/rerun-failed-jobs`
-  return call(
-    url,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-        'User-Agent': 'pagerline-server',
-      },
-    },
-    GITHUB_RERUN_LABEL,
-  )
+export const TELEGRAM_LABEL: Record<'delete' | 'mute' | 'ban', string> = {
+  delete: 'Telegram deleteMessage',
+  mute: 'Telegram restrictChatMember',
+  ban: 'Telegram banChatMember',
 }
 
-/** `PUT /api/0/organizations/{org}/issues/{issue_id}/` with `{status: "resolved"}`. */
-export async function sentryResolveIssue(org: string, issueId: string): Promise<ProviderOutcome> {
-  const token = process.env.SENTRY_API_TOKEN
-  if (!token) return { ok: false, status: null, message: publicMessage(SENTRY_RESOLVE_LABEL, null, false), detail: 'SENTRY_API_TOKEN not set' }
-  const url = `https://sentry.io/api/0/organizations/${encodeURIComponent(org)}/issues/${encodeURIComponent(issueId)}/`
-  return call(
-    url,
-    {
-      method: 'PUT',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'resolved' }),
-    },
-    SENTRY_RESOLVE_LABEL,
-  )
+/**
+ * Telegram Bot API moderation call. TODO H2: wire `deleteMessage` / `restrictChatMember` /
+ * `banChatMember` through `call()`; until then every non-dry-run call fails without a request.
+ */
+export async function telegramModerate(action: 'delete' | 'mute' | 'ban', _target: TelegramTarget): Promise<ProviderOutcome> {
+  const label = TELEGRAM_LABEL[action]
+  return { ok: false, status: null, message: publicMessage(label, null, false), detail: 'Telegram provider not wired yet (H2)' }
 }

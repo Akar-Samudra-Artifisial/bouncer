@@ -1,4 +1,4 @@
-import { isActionKind } from '@pagerline/shared'
+import { isActionKind } from '@bouncer/shared'
 import { createIntent } from '@/lib/actions'
 import { authenticateDevice } from '@/lib/auth'
 import { corsHeaders, isUuid, json, preflight, readJsonObject } from '@/lib/http'
@@ -16,7 +16,7 @@ export async function POST(request: Request) {
 
   const body = await readJsonObject(request)
   if (!body || !isUuid(body.alertId) || !isActionKind(body.action)) {
-    return json({ error: 'body must be {alertId: uuid, action: "rerun" | "resolve"}' }, 400, cors)
+    return json({ error: 'body must be {alertId: uuid, action: "delete" | "mute" | "ban" | "dismiss"}' }, 400, cors)
   }
   const result = await createIntent(device.deviceId, body.alertId, body.action)
   if (!result.ok) return json({ error: result.error }, result.status, cors)

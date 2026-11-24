@@ -1,25 +1,11 @@
-import type {
-  ActionConfirmResult,
-  ActionKind,
-  ActionPreview,
-  AlertStatus,
-  AlertTarget,
-  GithubRunTarget,
-  SentryIssueTarget,
-} from '@pagerline/shared'
+import { ACTION_KINDS, type ActionConfirmResult, type ActionKind, type ActionPreview, type AlertStatus, type AlertTarget, type TelegramTarget } from '@bouncer/shared'
 import { and, count, eq, gt, sql } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import { audit } from './audit'
 import { randomSecret, sha256Hex } from './crypto'
 import { setAlertStatus } from './ingest'
-import {
-  GITHUB_RERUN_LABEL,
-  githubRerunFailedJobs,
-  publicMessage,
-  SENTRY_RESOLVE_LABEL,
-  sentryResolveIssue,
-  type ProviderOutcome,
-} from './providers'
+import { publicMessage, TELEGRAM_LABEL, telegramModerate, type ProviderOutcome } from './providers'
+import { allowedChats } from './telegram'
 
 const RATE_WINDOW_MS = 10 * 60_000
 const RATE_LIMIT = 10
@@ -36,20 +22,16 @@ export function isDryRun(): boolean {
   return process.env.ACTIONS_DRY_RUN === '1'
 }
 
-function csv(name: string): string[] {
-  return (process.env[name] ?? '')
-    .split(',')
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean)
+function isTelegramTarget(t: AlertTarget | null): t is TelegramTarget {
+  return (
+    t !== null &&
+    Number.isSafeInteger((t as TelegramTarget).chatId) &&
+    Number.isSafeInteger((t as TelegramTarget).messageId) &&
+    Number.isSafeInteger((t as TelegramTarget).userId)
+  )
 }
 
-function isGithubTarget(t: AlertTarget | null): t is GithubRunTarget {
-  return t !== null && typeof (t as GithubRunTarget).repo === 'string' && Number.isSafeInteger((t as GithubRunTarget).runId)
-}
-
-function isSentryTarget(t: AlertTarget | null): t is SentryIssueTarget {
-  return t !== null && typeof (t as SentryIssueTarget).issueId === 'string' && /^\d+$/.test((t as SentryIssueTarget).issueId)
-}
+type ProviderAction = Exclude<ActionKind, 'dismiss'>
 
 interface AlertForAction {
   id: string
@@ -62,58 +44,52 @@ interface AlertForAction {
 
 type Check = { ok: true } | { ok: false; status: 403 | 422; error: string }
 
-/** Source/kind matrix: rerun only for GitHub `workflow_run.failure`, resolve only for Sentry. */
+/** Source matrix: `dismiss` works on any open alert; delete/mute/ban need a Telegram message target. */
 function checkMatrix(alert: AlertForAction, action: ActionKind): Check {
-  if (action === 'rerun') {
-    if (alert.source !== 'github' || alert.kind !== 'workflow_run.failure') {
-      return { ok: false, status: 422, error: 'rerun is only available for failed GitHub workflow runs' }
-    }
-    if (!isGithubTarget(alert.target)) return { ok: false, status: 422, error: 'alert has no workflow run target' }
-    return { ok: true }
+  if (action === 'dismiss') {
+    return alert.status === 'resolved' ? { ok: false, status: 422, error: 'alert is already closed' } : { ok: true }
   }
-  if (alert.source !== 'sentry') return { ok: false, status: 422, error: 'resolve is only available for Sentry issues' }
-  if (!isSentryTarget(alert.target)) return { ok: false, status: 422, error: 'alert has no Sentry issue target' }
+  if (alert.source !== 'telegram') return { ok: false, status: 422, error: `${action} is only available for Telegram alerts` }
+  if (!isTelegramTarget(alert.target)) return { ok: false, status: 422, error: 'alert has no Telegram message target' }
   return { ok: true }
 }
 
-/** Server-side allowlists (`GITHUB_ALLOWED_REPOS`, `SENTRY_ORG`, `SENTRY_ALLOWED_PROJECTS`). */
-function checkAllowlist(alert: AlertForAction): Check {
+/** Server-side allowlist: provider actions only in chats listed in `TELEGRAM_ALLOWED_CHATS`. */
+function checkAllowlist(alert: AlertForAction, action: ActionKind): Check {
+  if (action === 'dismiss') return { ok: true }
   const t = alert.target
-  if (isGithubTarget(t)) {
-    return csv('GITHUB_ALLOWED_REPOS').includes(t.repo.toLowerCase())
-      ? { ok: true }
-      : { ok: false, status: 403, error: `repository ${t.repo} is not in the action allowlist` }
-  }
-  if (isSentryTarget(t)) {
-    const org = (process.env.SENTRY_ORG ?? '').trim().toLowerCase()
-    if (!org) return { ok: false, status: 403, error: 'Sentry actions are not enabled on this server' }
-    if (t.org && t.org.toLowerCase() !== org) return { ok: false, status: 403, error: `Sentry org ${t.org} is not allowed` }
-    if (!t.project || !csv('SENTRY_ALLOWED_PROJECTS').includes(t.project.toLowerCase())) {
-      return { ok: false, status: 403, error: `Sentry project ${t.project ?? '(unknown)'} is not in the action allowlist` }
-    }
-    return { ok: true }
-  }
-  return { ok: false, status: 422, error: 'alert has no action target' }
+  if (!isTelegramTarget(t)) return { ok: false, status: 422, error: 'alert has no action target' }
+  return allowedChats().has(String(t.chatId))
+    ? { ok: true }
+    : { ok: false, status: 403, error: `chat ${t.chatId} is not in the action allowlist` }
 }
 
 /** Actions the glasses may offer for an alert (matrix + allowlist). */
 export function availableActions(alert: AlertForAction): ActionKind[] {
-  return (['rerun', 'resolve'] as const).filter((a) => checkMatrix(alert, a).ok && checkAllowlist(alert).ok)
+  return ACTION_KINDS.filter((a) => checkMatrix(alert, a).ok && checkAllowlist(alert, a).ok)
+}
+
+const HEADLINE: Record<ActionKind, string> = {
+  delete: 'Delete message',
+  mute: 'Mute user 1 hour',
+  ban: 'Ban user',
+  dismiss: 'Dismiss flag',
+}
+
+const DETAIL: Record<ActionKind, string> = {
+  delete: 'Deletes the flagged message from the group.',
+  mute: 'Stops the author from sending messages for 1 hour.',
+  ban: 'Removes the author from the group and blocks rejoining.',
+  dismiss: 'Closes the flag without touching Telegram.',
 }
 
 function describe(alert: AlertForAction, action: ActionKind): Pick<ActionPreview, 'headline' | 'target' | 'detail'> {
-  if (action === 'rerun' && isGithubTarget(alert.target)) {
-    return {
-      headline: 'Re-run failed jobs',
-      target: `${alert.target.repo} · run ${alert.target.runId}`,
-      detail: `Starts a new attempt of only the failed jobs in this workflow run. “${alert.title}”`,
-    }
-  }
-  const t = alert.target as SentryIssueTarget
+  const t = isTelegramTarget(alert.target) ? alert.target : null
+  const who = t ? (t.username ? `@${t.username}` : `user ${t.userId}`) : '?'
   return {
-    headline: 'Resolve Sentry issue',
-    target: `${t.project ?? '?'} · issue ${t.issueId}`,
-    detail: `Marks the issue resolved in Sentry; it reopens if the error happens again. “${alert.title}”`,
+    headline: HEADLINE[action],
+    target: t ? `${who} · ${t.chatTitle ?? t.chatId} · msg ${t.messageId}` : alert.title,
+    detail: `${DETAIL[action]} “${alert.title}”`,
   }
 }
 
@@ -130,7 +106,7 @@ export async function createIntent(deviceId: string, alertId: string, action: Ac
     .limit(1)
   if (!alert) return { ok: false, status: 404, error: 'alert not found' }
 
-  const denied = [checkMatrix(alert, action), checkAllowlist(alert)].find((c) => !c.ok)
+  const denied = [checkMatrix(alert, action), checkAllowlist(alert, action)].find((c) => !c.ok)
   if (denied && !denied.ok) {
     await audit({ event: 'action.denied', actor, alertId, detail: { action, reason: denied.error } })
     return { ok: false, status: denied.status, error: denied.error }
@@ -178,27 +154,25 @@ export type ConfirmResult =
   | { ok: false; status: 403 | 404 | 409 | 410; error: string }
 
 /**
- * Dry-run stand-in for the provider. A target id (run id / issue id) that starts with `9999`
- * and ends in an HTTP status (e.g. `9999…409`) simulates that provider error, so the
- * failure path is testable without real credentials; anything else succeeds.
+ * Dry-run stand-in for the provider. A message id that starts with `9999` and ends in an
+ * HTTP status (e.g. `9999…400`) simulates that provider error, so the failure path is
+ * testable without a bot token; anything else succeeds.
  */
-function fakeProvider(action: ActionKind, target: AlertTarget | null): ProviderOutcome {
-  const label = action === 'rerun' ? GITHUB_RERUN_LABEL : SENTRY_RESOLVE_LABEL
-  const id = isGithubTarget(target) ? String(target.runId) : isSentryTarget(target) ? target.issueId : ''
+function fakeProvider(action: ProviderAction, target: AlertTarget | null): ProviderOutcome {
+  const label = TELEGRAM_LABEL[action]
+  const id = isTelegramTarget(target) ? String(target.messageId) : ''
   const simulated = /^9999\d*([1-5]\d\d)$/.exec(id)
   if (simulated) {
     const status = Number(simulated[1])
     return { ok: false, status, message: publicMessage(label, status, false), detail: 'dry run: simulated provider error' }
   }
-  return { ok: true, status: null, message: `dry run: ${action} not sent to provider` }
+  return { ok: true, status: null, message: `dry run: ${action} not sent to Telegram` }
 }
 
 async function runProvider(action: ActionKind, target: AlertTarget | null): Promise<ProviderOutcome> {
+  if (action === 'dismiss') return { ok: true, status: null, message: 'dismissed' }
   if (isDryRun()) return fakeProvider(action, target)
-  if (action === 'rerun' && isGithubTarget(target)) return githubRerunFailedJobs(target)
-  if (action === 'resolve' && isSentryTarget(target)) {
-    return sentryResolveIssue(target.org ?? (process.env.SENTRY_ORG ?? '').trim(), target.issueId)
-  }
+  if (isTelegramTarget(target)) return telegramModerate(action, target)
   return { ok: false, status: null, message: 'alert target no longer matches the action' }
 }
 
@@ -265,13 +239,13 @@ export async function confirmIntent(deviceId: string, requestId: string, nonce: 
     } else {
       alertStatus = alert.status as AlertStatus
       // Re-check: the allowlist/env or the alert may have changed since the intent.
-      const denied = [checkMatrix(alert, action), checkAllowlist(alert)].find((c) => !c.ok)
+      const denied = [checkMatrix(alert, action), checkAllowlist(alert, action)].find((c) => !c.ok)
       if (denied && !denied.ok) {
         outcome = { ok: false, status: null, message: `no longer allowed: ${denied.error}` }
         await audit({ event: 'action.denied', actor, alertId: alert.id, detail: { requestId, action, reason: denied.error } })
       } else {
         outcome = await runProvider(action, alert.target)
-        if (outcome.ok && action === 'resolve') {
+        if (outcome.ok) {
           await setAlertStatus(alert.id, 'resolved')
           alertStatus = 'resolved'
         }
@@ -279,7 +253,7 @@ export async function confirmIntent(deviceId: string, requestId: string, nonce: 
     }
     result = toResult(requestId, won.alertId, action, outcome, dryRun, alertStatus)
   } catch (err) {
-    console.error(`[pagerline] confirm ${requestId} failed:`, err instanceof Error ? err.message : err)
+    console.error(`[bouncer] confirm ${requestId} failed:`, err instanceof Error ? err.message : err)
     const message = outcome?.ok
       ? 'the provider accepted the action, but the server failed to record it'
       : 'internal error while running the action'

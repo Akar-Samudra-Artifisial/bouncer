@@ -1,6 +1,6 @@
 import { AuditTable } from './audit-table'
 
-export const metadata = { title: 'Pagerline · audit log' }
+export const metadata = { title: 'Bouncer · audit log' }
 
 export default function AuditPage() {
   return (

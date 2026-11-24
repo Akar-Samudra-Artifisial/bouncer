@@ -25,10 +25,10 @@ function minutesLeft(iso: string, now = Date.now()): string {
 export function pairBody(v: PairView): string {
   switch (v.phase) {
     case 'starting':
-      return ['Pair this G2 with Pagerline', '', 'Requesting a pairing code…'].join('\n')
+      return ['Pair this G2 with Bouncer', '', 'Requesting a pairing code…'].join('\n')
     case 'pending':
       return [
-        'Pair this G2 with Pagerline',
+        'Pair this G2 with Bouncer',
         '',
         `CODE     ${spaced(v.code)}`,
         '',
@@ -38,10 +38,10 @@ export function pairBody(v: PairView): string {
         'Double-tap: exit',
       ].join('\n')
     case 'expired':
-      return ['Pair this G2 with Pagerline', '', 'The pairing code expired.', '', 'Tap: get a new code', 'Double-tap: exit'].join('\n')
+      return ['Pair this G2 with Bouncer', '', 'The pairing code expired.', '', 'Tap: get a new code', 'Double-tap: exit'].join('\n')
     case 'error':
       return [
-        'Pair this G2 with Pagerline',
+        'Pair this G2 with Bouncer',
         '',
         clip(v.title ?? 'Could not get a pairing code:', LINE),
         clip(v.message, LINE),

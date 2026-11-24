@@ -5,29 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1795508538261,
+      "when": 1795541773706,
       "tag": "0000_init",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1795509124602,
-      "tag": "0001_sentry_issue_dedup",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1795514620282,
-      "tag": "0002_actions_pairing",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1795521050845,
-      "tag": "0003_ai_summary",
       "breakpoints": true
     }
   ]

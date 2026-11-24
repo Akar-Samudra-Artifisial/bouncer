@@ -1,6 +1,6 @@
 'use server'
 
-import type { AuditEntry } from '@pagerline/shared'
+import type { AuditEntry } from '@bouncer/shared'
 import { headers } from 'next/headers'
 import { listAudit } from '@/lib/audit'
 import { clientIp, verifyAdminSecret } from '@/lib/auth'

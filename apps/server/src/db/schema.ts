@@ -1,4 +1,4 @@
-import type { AlertTarget } from '@pagerline/shared'
+import type { AlertTarget } from '@bouncer/shared'
 import { sql } from 'drizzle-orm'
 import { bigserial, check, index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core'
 
@@ -9,9 +9,9 @@ export const alerts = pgTable(
     /** Monotonic cursor for `GET /api/alerts?since=`. */
     seq: bigserial('seq', { mode: 'number' }).notNull().unique(),
     source: text('source').notNull(),
-    /** Provider delivery id (X-GitHub-Delivery / Sentry Request-ID); dedup key. */
+    /** Provider delivery id (Telegram `update_id`); dedup key for redeliveries. */
     deliveryId: text('delivery_id').notNull(),
-    /** Provider object identity (e.g. `issue:<sentry issue id>`) so one incident yields one alert; null = none. */
+    /** Provider object identity (`msg:<chatId>:<messageId>`) so one message yields one alert; null = none. */
     dedupKey: text('dedup_key'),
     kind: text('kind').notNull(),
     severity: text('severity').notNull(),
@@ -21,7 +21,7 @@ export const alerts = pgTable(
     scope: text('scope'),
     url: text('url'),
     payload: jsonb('payload').notNull(),
-    /** Structured provider target for actions (`{repo, runId}` / `{org?, project?, issueId}`); null = no action target. */
+    /** Structured provider target for actions (`{chatId, messageId, userId, username?, chatTitle?}`); null = no action target. */
     target: jsonb('target').$type<AlertTarget>(),
     /** Cached AI summary (≤ 240 chars, plain text); null until first generated. */
     aiSummary: text('ai_summary'),
@@ -98,7 +98,7 @@ export const auditLog = pgTable(
   'audit_log',
   {
     id: bigserial('id', { mode: 'number' }).primaryKey(),
-    /** e.g. `webhook.github`, `webhook.sentry`, later `action.ack`. */
+    /** e.g. `webhook.telegram`, `action.intent`, `pair.approved`. */
     event: text('event').notNull(),
     actor: text('actor'),
     alertId: uuid('alert_id').references(() => alerts.id, { onDelete: 'set null' }),

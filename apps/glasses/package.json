@@ -1,5 +1,5 @@
 {
-  "name": "@pagerline/glasses",
+  "name": "@bouncer/glasses",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -8,12 +8,12 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "pack": "tsc --noEmit && VITE_API_BASE=https://pagerline.vercel.app VITE_MOCK= vite build && evenhub pack app.json dist --sdk-ver 0.0.16 -o pagerline.ehpk",
+    "pack": "tsc --noEmit && VITE_API_BASE=https://bouncer.vercel.app VITE_MOCK= vite build && evenhub pack app.json dist --sdk-ver 0.0.16 -o bouncer.ehpk",
     "simulate": "evenhub-simulator http://localhost:5173 --automation-port 9898"
   },
   "dependencies": {
     "@evenrealities/even_hub_sdk": "0.0.16",
-    "@pagerline/shared": "workspace:*"
+    "@bouncer/shared": "workspace:*"
   },
   "devDependencies": {
     "@evenrealities/evenhub-cli": "0.2.0",

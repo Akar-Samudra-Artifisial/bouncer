@@ -95,7 +95,7 @@ export function isUuid(value: unknown): value is string {
 
 /** 500 for a missing server secret: the env name goes to the server log, never the response. */
 export function notConfigured(envName: string): Response {
-  console.error(`[pagerline] ${envName} is not configured`)
+  console.error(`[bouncer] ${envName} is not configured`)
   return json({ error: 'server not configured' }, 500)
 }
 

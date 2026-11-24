@@ -1,4 +1,4 @@
-import type { ActionKind, ActionPreview, Alert, VoiceIntent } from '@pagerline/shared'
+import type { ActionKind, ActionPreview, Alert, VoiceIntent } from '@bouncer/shared'
 import { waitForEvenAppBridge } from '@evenrealities/even_hub_sdk'
 import {
   ApiError,
@@ -721,8 +721,8 @@ function nextAlertId(alertId: string): string | undefined {
 /** What will happen, shown under the transcript. */
 function intentNote(intent: VoiceIntent, alertId: string): string {
   switch (intent) {
-    case 'rerun':
-    case 'resolve':
+    case 'delete':
+    case 'dismiss':
       return canRun(alertId, intent) ? `→ ${ACTION_LABEL[intent]}: opening confirm…` : `→ ${ACTION_LABEL[intent]} is not available here`
     case 'next':
       return nextAlertId(alertId) ? '→ Next alert…' : '→ No next alert'
@@ -746,8 +746,8 @@ function runIntent(token: number, intent: VoiceIntent): void {
   if (!s) return
   const { alertId } = s
   switch (intent) {
-    case 'rerun':
-    case 'resolve':
+    case 'delete':
+    case 'dismiss':
       if (!canRun(alertId, intent)) {
         go({ name: 'detail', alertId })
         return
@@ -904,7 +904,7 @@ function mirror(): void {
   if (!app) return
   if (state.screen.name === 'pair') {
     const p = state.pair
-    app.innerHTML = `<h1 style="font-size:18px;margin:0 0 8px">Pagerline · pair</h1>
+    app.innerHTML = `<h1 style="font-size:18px;margin:0 0 8px">Bouncer · pair</h1>
       <p style="margin:0 0 12px">${
         p.phase === 'pending'
           ? `Code <b style="font-size:22px;letter-spacing:4px">${escapeHtml(p.code)}</b> — approve at ${escapeHtml(p.url)}`
@@ -914,7 +914,7 @@ function mirror(): void {
   }
   if (state.screen.name === 'voice') {
     // Browser-mic fallback records on the phone: show progress there too.
-    app.innerHTML = `<h1 style="font-size:18px;margin:0 0 8px">Pagerline · voice</h1>
+    app.innerHTML = `<h1 style="font-size:18px;margin:0 0 8px">Bouncer · voice</h1>
       <pre style="white-space:pre-wrap;margin:0">${escapeHtml(voiceBody(state.screen.view))}</pre>`
     return
   }
@@ -922,7 +922,7 @@ function mirror(): void {
     .slice(0, 10)
     .map((a) => `<li>[${a.severity}] ${escapeHtml(a.title)}</li>`)
     .join('')
-  app.innerHTML = `<h1 style="font-size:18px;margin:0 0 8px">Pagerline</h1>
+  app.innerHTML = `<h1 style="font-size:18px;margin:0 0 8px">Bouncer</h1>
     <p style="color:#919191;margin:0 0 12px">${escapeHtml(header())}${state.error ? ` — ${escapeHtml(state.error)}` : ''}</p>
     <ul style="padding-left:18px;margin:0">${rows || '<li>No alerts</li>'}</ul>`
 }

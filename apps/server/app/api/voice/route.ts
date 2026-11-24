@@ -1,4 +1,4 @@
-import type { VoiceResponse } from '@pagerline/shared'
+import type { VoiceResponse } from '@bouncer/shared'
 import { eq } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import { audit } from '@/lib/audit'
@@ -38,7 +38,7 @@ export async function POST(request: Request) {
 
   const mock = mockTranscript(request)
   if (mock === null && !sttConfigured()) {
-    console.error('[pagerline] CARTESIA_API_KEY is not configured')
+    console.error('[bouncer] CARTESIA_API_KEY is not configured')
     return json({ error: 'voice commands are not configured on this server' }, 503, cors)
   }
 
@@ -90,7 +90,7 @@ export async function POST(request: Request) {
   } else {
     const stt = await transcribe(audio, format)
     if (!stt.ok) {
-      console.error(`[pagerline] voice STT failed: ${stt.message}`)
+      console.error(`[bouncer] voice STT failed: ${stt.message}`)
       // The reserved quota is kept on purpose: refunding would mean deleting audit rows, and a
       // failing provider should not be retried in a tight loop anyway.
       await audit({ event: 'voice.failed', actor, alertId, detail: { providerStatus: stt.status, reason: stt.message.slice(0, 80) } })

@@ -1,4 +1,4 @@
-import type { Alert, AlertSeverity, AlertSource, AlertStatus, AlertsResponse } from '@pagerline/shared'
+import type { Alert, AlertSeverity, AlertSource, AlertStatus, AlertsResponse } from '@bouncer/shared'
 import { asc, desc, gt } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import { availableActions } from '@/lib/actions'

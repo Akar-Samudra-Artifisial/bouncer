@@ -1,4 +1,4 @@
-import type { Alert, AlertSeverity } from '@pagerline/shared'
+import type { Alert, AlertSeverity } from '@bouncer/shared'
 
 const SEVERITY_TAG: Record<AlertSeverity, string> = {
   critical: 'CRIT',
@@ -36,5 +36,5 @@ export interface HeaderState {
 export function headerText(s: HeaderState): string {
   const clock = new Date().toTimeString().slice(0, 5)
   const link = s.mock ? 'MOCK' : s.online ? 'LIVE' : 'OFFLINE'
-  return clip(`PAGERLINE · ${s.title} · ${s.openCount} open · ${link} · ${clock}`, 80)
+  return clip(`BOUNCER · ${s.title} · ${s.openCount} open · ${link} · ${clock}`, 80)
 }

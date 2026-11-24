@@ -8,7 +8,7 @@ import type {
   SummaryResponse,
   VoiceIntent,
   VoiceResponse,
-} from '@pagerline/shared'
+} from '@bouncer/shared'
 import { ApiError } from './errors'
 
 const now = Date.now()
@@ -19,49 +19,63 @@ export const MOCK_ALERTS: Alert[] = [
   {
     id: 'mock-1',
     seq: 1,
-    source: 'github',
-    kind: 'workflow_run.failure',
-    severity: 'high',
+    source: 'telegram',
+    kind: 'telegram.link',
+    severity: 'medium',
     status: 'open',
-    title: 'CI failed: CI / test on main',
-    summary: 'acme/checkout-api · by rina · "Bump payment SDK to 4.2"',
-    scope: 'acme/checkout-api',
+    title: '@cheap_followers: Grow your channel fast → bit.ly/x…',
+    summary: 'link — Grow your channel fast → bit.ly/x… 10k followers for $5',
+    scope: 'Hiking Club Bandung',
     url: null,
     createdAt: ago(14),
-    target: { repo: 'acme/checkout-api', runId: 9912345 },
-    actions: ['rerun'],
+    target: { chatId: -1001000000001, messageId: 4210, userId: 70001, username: 'cheap_followers', chatTitle: 'Hiking Club Bandung' },
+    actions: ['delete', 'mute', 'ban', 'dismiss'],
   },
   {
     id: 'mock-2',
     seq: 2,
-    source: 'sentry',
-    kind: 'sentry.issue.created',
+    source: 'telegram',
+    kind: 'telegram.report',
     severity: 'high',
     status: 'open',
-    title: "TypeError: Cannot read properties of undefined (reading 'amount')",
-    summary: 'checkout-api · src/payments/capture.ts in captureCharge · CHECKOUT-API-7F',
-    scope: 'checkout-api',
+    title: '@shouty_guy: you are all idiots, leave this group',
+    summary: 'reported by @rina — you are all idiots, leave this group',
+    scope: 'Hiking Club Bandung',
     url: null,
     createdAt: ago(6),
-    target: { org: 'acme', project: 'checkout-api', issueId: '4711' },
-    actions: ['resolve'],
+    target: { chatId: -1001000000001, messageId: 4233, userId: 70002, username: 'shouty_guy', chatTitle: 'Hiking Club Bandung' },
+    actions: ['delete', 'mute', 'ban', 'dismiss'],
   },
   {
     id: 'mock-3',
     seq: 3,
-    source: 'sentry',
-    kind: 'sentry.event_alert',
-    severity: 'critical',
+    source: 'telegram',
+    kind: 'telegram.keyword',
+    severity: 'high',
     status: 'open',
-    title: 'Error rate spike on /v1/checkout',
-    summary: 'rule: Error rate > 5% for 5m · POST /v1/checkout',
-    scope: null,
+    title: 'Budi: DM me for crypto airdrop, guaranteed 10x',
+    summary: 'keyword "airdrop" — DM me for crypto airdrop, guaranteed 10x',
+    scope: 'Dev Meetup JKT',
     url: null,
     createdAt: ago(2),
-    target: null,
-    actions: [],
+    target: { chatId: -1001000000002, messageId: 912, userId: 70003, chatTitle: 'Dev Meetup JKT' },
+    actions: ['delete', 'mute', 'ban', 'dismiss'],
   },
 ]
+
+const MOCK_HEADLINE: Record<ActionKind, string> = {
+  delete: 'Delete message',
+  mute: 'Mute user 1 hour',
+  ban: 'Ban user',
+  dismiss: 'Dismiss flag',
+}
+
+const MOCK_DETAIL: Record<ActionKind, string> = {
+  delete: 'Deletes the flagged message from the group.',
+  mute: 'Stops the author from sending messages for 1 hour.',
+  ban: 'Removes the author from the group and blocks rejoining.',
+  dismiss: 'Closes the flag without touching Telegram.',
+}
 
 // ---- pairing: auto-approves a few seconds after the code is shown ----------
 
@@ -107,19 +121,16 @@ export async function mockIntent(alertId: string, action: ActionKind): Promise<A
   const expiresAt = Date.now() + MOCK_TTL_MS
   mockRequests.set(requestId, { nonce, alertId, action, expiresAt })
   const t = alert.target
-  const isRerun = action === 'rerun'
+  const who = t ? (t.username ? `@${t.username}` : `user ${t.userId}`) : '?'
   return {
     requestId,
     nonce,
     expiresAt: new Date(expiresAt).toISOString(),
     alertId,
     action,
-    headline: isRerun ? 'Re-run failed jobs' : 'Resolve Sentry issue',
-    target:
-      t && 'runId' in t ? `${t.repo} · run ${t.runId}` : t && 'issueId' in t ? `${t.project ?? '?'} · issue ${t.issueId}` : '?',
-    detail: isRerun
-      ? 'Starts a new attempt of only the failed jobs in this workflow run.'
-      : 'Marks the issue resolved in Sentry; it reopens if the error happens again.',
+    headline: MOCK_HEADLINE[action],
+    target: t ? `${who} · ${t.chatTitle ?? t.chatId} · msg ${t.messageId}` : '?',
+    detail: MOCK_DETAIL[action],
     dryRun: true,
   }
 }
@@ -143,7 +154,8 @@ export async function mockVoice(alertId: string): Promise<VoiceResponse> {
   await delay(700)
   const alert = MOCK_ALERTS.find((a) => a.id === alertId)
   const step = MOCK_VOICE_SCRIPT[mockVoiceTurn++ % MOCK_VOICE_SCRIPT.length]
-  const action = alert?.actions?.[0]
+  // Only delete/dismiss have voice phrases (TODO H2: mute/ban).
+  const action = alert?.actions?.find((a): a is 'delete' | 'dismiss' => a === 'delete' || a === 'dismiss')
   if (step.intent === 'action') {
     // Alerts without an action: the "command" is simply not understood.
     if (!action) return { transcript: 'fix it', intent: 'unknown', alertId }
@@ -173,7 +185,7 @@ export async function mockConfirm(requestId: string, nonce: string): Promise<Act
   mockRequests.delete(requestId)
   if (Date.now() > req.expiresAt) throw new ApiError(410, 'action request expired')
   const alert = MOCK_ALERTS.find((a) => a.id === req.alertId)
-  if (alert && req.action === 'resolve') alert.status = 'resolved'
+  if (alert) alert.status = 'resolved'
   return {
     requestId,
     alertId: req.alertId,

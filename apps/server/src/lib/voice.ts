@@ -1,15 +1,15 @@
-import type { VoiceIntent } from '@pagerline/shared'
+import type { VoiceIntent } from '@bouncer/shared'
 import { isProduction } from './auth'
 
 // ---------------------------------------------------------------------------
 // Rule-based intent parser (no LLM): only the transcript is parsed, never alert content.
 
-/** Negates a write action wherever it appears ("don't rerun", "undo resolve", "rerun, cancel"). */
+/** Negates a write action wherever it appears ("don't delete", "undo dismiss", "delete, cancel"). */
 const NEGATION = /\b(don'?t|do not|dont|never|cancel|stop|undo|not)\b/
-/** "no" only negates when it comes before the action verb ("no, don't…", "no rerun"); "rerun, no wait" stays rerun. */
+/** "no" only negates when it comes before the action verb ("no, don't…", "no delete"); "delete it, no wait" stays delete. */
 const NO_WORD = /\bno\b/
-const RERUN = /\b(re-? ?run|retry|run (it|this|that|the [a-z]+) again|restart (the )?(build|job|jobs|workflow|pipeline|ci))\b/
-const RESOLVE = /\b(resolve|resolved|mark (it |this |that )?(as )?(resolved|fixed|done)|close (the |this |that )?(issue|incident))\b/
+const DELETE = /\b(delete|remove|erase|take (it|this|that) down)\b/
+const DISMISS = /\b(dismiss|ignore( it| this| that)?|it'?s fine|false alarm|keep (it|this|that))\b/
 const SUMMARY = /\b(summary|summari[sz]e|explain|what happened|what'?s (wrong|going on|up)|tl ?dr|details?)\b/
 /** "back to the inbox" is inbox, not back. */
 const INBOX_RETURN = /\b(back|return|go) to (the )?(inbox|home|alert list|list|alerts)\b/
@@ -31,20 +31,21 @@ export function normalizeTranscript(text: string): string {
 }
 
 /**
- * Map a transcript to one intent. Ambiguity (both rerun and resolve), negation of a write
+ * Map a transcript to one intent. Ambiguity (both delete and dismiss), negation of a write
  * action, or a long sentence → `unknown`. Write intents are only returned, never executed.
+ * TODO H2: mute/ban phrases.
  */
 export function parseIntent(transcript: string): VoiceIntent {
   const t = normalizeTranscript(transcript)
   if (!t || t.split(' ').length > MAX_COMMAND_WORDS) return 'unknown'
-  const rerun = RERUN.exec(t)
-  const resolve = RESOLVE.exec(t)
-  const verb = rerun ?? resolve
+  const del = DELETE.exec(t)
+  const dismiss = DISMISS.exec(t)
+  const verb = del ?? dismiss
   if (verb) {
-    if (rerun && resolve) return 'unknown'
+    if (del && dismiss) return 'unknown'
     const no = NO_WORD.exec(t)
     if (NEGATION.test(t) || (no && no.index < verb.index)) return 'unknown'
-    return rerun ? 'rerun' : 'resolve'
+    return del ? 'delete' : 'dismiss'
   }
   if (SUMMARY.test(t)) return 'summary'
   if (INBOX_RETURN.test(t)) return 'inbox'

@@ -1,6 +1,6 @@
-// Shared contract between the Pagerline server and the G2 glasses app.
+// Shared contract between the Bouncer server and the G2 glasses app.
 
-export const ALERT_SOURCES = ['github', 'sentry'] as const
+export const ALERT_SOURCES = ['telegram'] as const
 export type AlertSource = (typeof ALERT_SOURCES)[number]
 
 export const ALERT_SEVERITIES = ['critical', 'high', 'medium', 'low', 'info'] as const
@@ -14,19 +14,21 @@ export interface Alert {
   id: string
   /**
    * Monotonic sequence used as the polling cursor (`GET /api/alerts?since=`).
-   * A status change (resolve from the glasses or Sentry, reopen, …) moves the alert to a new,
+   * A status change (e.g. dismiss from the glasses) moves the alert to a new,
    * higher `seq`, so the SAME `id` can be returned again with the new `status`:
    * clients must upsert by `id`, never append.
    */
   seq: number
   source: AlertSource
-  /** Source-specific kind, e.g. `workflow_run.failure`, `issues.opened`, `sentry.issue`. */
+  /** Source-specific kind: `telegram.report`, `telegram.keyword`, `telegram.link`. */
   kind: string
   severity: AlertSeverity
   status: AlertStatus
+  /** `@username: <message text>` (truncated). */
   title: string
+  /** Flag reason(s), reporter and the message text (≤ 500 chars). */
   summary: string
-  /** Repository (`owner/name`) or Sentry project slug. */
+  /** Group title (or chat id when the group has no title). */
   scope: string | null
   url: string | null
   /** ISO-8601 timestamp. */
@@ -37,20 +39,20 @@ export interface Alert {
   actions?: ActionKind[]
 }
 
-/** GitHub Actions run (`workflow_run.failure` alerts). */
-export interface GithubRunTarget {
-  repo: string
-  runId: number
+/**
+ * Flagged Telegram message. Ids are numbers: Bot API chat/user ids fit in 52 bits,
+ * so a JS number (double) holds them exactly.
+ */
+export interface TelegramTarget {
+  chatId: number
+  messageId: number
+  /** Author of the flagged message (the moderation target). */
+  userId: number
+  username?: string
+  chatTitle?: string
 }
 
-/** Sentry issue (`sentry.*` alerts). `org` falls back to the server's `SENTRY_ORG`. */
-export interface SentryIssueTarget {
-  org?: string
-  project?: string
-  issueId: string
-}
-
-export type AlertTarget = GithubRunTarget | SentryIssueTarget
+export type AlertTarget = TelegramTarget
 
 export interface AlertsResponse {
   /** Ascending `seq`; may contain alerts seen before (status changed) — upsert by `id`. */
@@ -59,46 +61,14 @@ export interface AlertsResponse {
   cursor: number
 }
 
-/**
- * Tier 1 = low-risk, reversible actions (single confirm).
- * Tier 2 = actions that change CI/incident state (explicit second confirm).
- */
-export type ActionTier = 1 | 2
-
-export const TIER1_ACTIONS = ['ack', 'assign', 'comment'] as const
-export const TIER2_ACTIONS = ['rerun', 'resolve', 'mute'] as const
-
-export type Tier1Action = (typeof TIER1_ACTIONS)[number]
-export type Tier2Action = (typeof TIER2_ACTIONS)[number]
-export type AlertAction = Tier1Action | Tier2Action
-
-export function tierOf(action: AlertAction): ActionTier {
-  return (TIER1_ACTIONS as readonly string[]).includes(action) ? 1 : 2
-}
-
-export interface IntentArgs {
-  assignee?: string
-  comment?: string
-  /** Mute duration in minutes. */
-  muteMinutes?: number
-}
-
-export interface Intent {
-  action: AlertAction
-  alertId: string
-  tier: ActionTier
-  args?: IntentArgs
-  /** How the intent was produced on the glasses. */
-  origin: 'menu' | 'voice'
-  /** Raw transcript when `origin === 'voice'`. */
-  transcript?: string
-}
-
 // ---------------------------------------------------------------------------
-// Write actions (H3): intent → preview + nonce → confirm.
+// Write actions: intent → preview + nonce → confirm.
 
-/** Write actions the server actually executes (others in AlertAction are not wired). */
-export const ACTION_KINDS = ['rerun', 'resolve'] as const
+/**
+ * Moderation actions. `delete`/`mute`/`ban` call the Telegram Bot API (wired in H2; until then
+ * only `ACTIONS_DRY_RUN=1` succeeds); `dismiss` has no provider call and only closes the alert.
+ */
+export const ACTION_KINDS = ['delete', 'mute', 'ban', 'dismiss'] as const
 export type ActionKind = (typeof ACTION_KINDS)[number]
 
 export function isActionKind(value: unknown): value is ActionKind {
@@ -124,9 +94,9 @@ export interface ActionPreview {
   expiresAt: string
   alertId: string
   action: ActionKind
-  /** Short line for the glasses, e.g. `Re-run failed jobs`. */
+  /** Short line for the glasses, e.g. `Delete message`. */
   headline: string
-  /** Target in human form, e.g. `owner/repo · run 123`. */
+  /** Target in human form, e.g. `@spammer · Group name · msg 123`. */
   target: string
   /** One or two sentences describing the effect. */
   detail: string
@@ -154,10 +124,10 @@ export interface ActionConfirmResult {
   action: ActionKind
   status: 'succeeded' | 'failed'
   message: string
-  /** HTTP status from GitHub/Sentry; null on dry run or network error. */
+  /** HTTP status from the Telegram Bot API; null on dry run, dismiss or network error. */
   providerStatus: number | null
   dryRun: boolean
-  /** Alert status after the action (`resolved` after a successful resolve). */
+  /** Alert status after the action (`resolved` after a successful action). */
   alertStatus: AlertStatus
 }
 
@@ -185,10 +155,11 @@ export type PairStatusResponse =
 // Voice commands (H4) and AI summaries (H5).
 
 /**
- * What a spoken command maps to. `rerun`/`resolve` are NEVER executed by `/api/voice`:
+ * What a spoken command maps to. Action intents are NEVER executed by `/api/voice`:
  * the glasses must still call `POST /api/actions/intent` and show the Confirm screen.
+ * TODO H3: voice phrases for `mute`/`ban`.
  */
-export const VOICE_INTENTS = ['rerun', 'resolve', 'next', 'back', 'inbox', 'summary', 'unknown'] as const
+export const VOICE_INTENTS = ['delete', 'dismiss', 'next', 'back', 'inbox', 'summary', 'unknown'] as const
 export type VoiceIntent = (typeof VOICE_INTENTS)[number]
 
 /**
@@ -222,7 +193,7 @@ export interface SummaryResponse {
 
 export interface AuditEntry {
   id: number
-  /** e.g. `action.intent`, `action.succeeded`, `pair.approved`, `webhook.github`. */
+  /** e.g. `action.intent`, `action.succeeded`, `pair.approved`, `webhook.telegram`. */
   event: string
   actor: string | null
   alertId: string | null

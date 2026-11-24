@@ -1,4 +1,4 @@
-import type { Alert } from '@pagerline/shared'
+import type { Alert } from '@bouncer/shared'
 import { ListContainerProperty, ListItemContainerProperty } from '@evenrealities/even_hub_sdk'
 import { HEADER_H, INBOX_LIST, MAX_LIST_ITEM_CHARS, MAX_LIST_ITEMS, SCREEN_H, SCREEN_W } from '../ids'
 import { ago, clip, sevTag } from './format'

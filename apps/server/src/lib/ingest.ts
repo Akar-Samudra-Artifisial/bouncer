@@ -1,4 +1,4 @@
-import type { AlertSeverity, AlertSource, AlertStatus, AlertTarget } from '@pagerline/shared'
+import type { AlertSeverity, AlertSource, AlertStatus, AlertTarget } from '@bouncer/shared'
 import { and, eq, ne, sql } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 
@@ -11,16 +11,16 @@ export interface NormalizedAlert {
   summary: string
   scope: string | null
   url: string | null
-  /** Provider object identity shared by related webhooks (e.g. one Sentry issue); null = dedup by delivery only. */
+  /** Provider object identity shared by related webhooks (e.g. one Telegram message); null = dedup by delivery only. */
   dedupKey: string | null
   /** Provider object write actions operate on; null when none. */
   target: AlertTarget | null
   /**
-   * Status the provider reports for the object (e.g. Sentry `issue.resolved` / `issue.unresolved`).
+   * Status the provider reports for the object (unused by Telegram ingest; kept for status-carrying providers).
    * When set and an alert with the same dedup key exists, its status is updated (and its `seq` bumped).
    */
   status?: AlertStatus
-  /** Only update an existing alert; never create one (e.g. `issue.resolved` for an issue we never alerted on). */
+  /** Only update an existing alert; never create one (e.g. a status update for an object we never alerted on). */
   updateOnly?: boolean
 }
 

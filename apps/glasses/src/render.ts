@@ -47,7 +47,7 @@ export class Renderer {
 
   private enqueue(task: () => Promise<void>): Promise<void> {
     const next = this.queue.then(task)
-    this.queue = next.catch((err: unknown) => console.error('[pagerline] render failed:', err))
+    this.queue = next.catch((err: unknown) => console.error('[bouncer] render failed:', err))
     return next
   }
 }

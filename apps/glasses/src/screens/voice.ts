@@ -1,4 +1,4 @@
-import type { VoiceIntent } from '@pagerline/shared'
+import type { VoiceIntent } from '@bouncer/shared'
 import { VOICE_BODY } from '../ids'
 import type { MicSource } from '../recorder'
 import { clip } from './format'
@@ -14,7 +14,7 @@ export type VoiceView =
   | { kind: 'heard'; source: VoiceMic; transcript: string; intent: VoiceIntent; next: string }
   | { kind: 'message'; title: string; detail?: string }
 
-const HINT = 'Say: rerun · resolve · next · back · inbox · summary'
+const HINT = 'Say: delete · dismiss · next · back · inbox · summary'
 
 export function voiceBody(v: VoiceView): string {
   switch (v.kind) {

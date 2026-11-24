@@ -1,5 +1,5 @@
 {
-  "name": "@pagerline/server",
+  "name": "@bouncer/server",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -12,7 +12,7 @@
     "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
-    "@pagerline/shared": "workspace:*",
+    "@bouncer/shared": "workspace:*",
     "drizzle-orm": "0.45.4",
     "next": "16.4.6",
     "postgres": "3.4.9",

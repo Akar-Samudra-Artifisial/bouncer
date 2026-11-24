@@ -1,4 +1,4 @@
-import type { PairStartResponse, PairStatusResponse } from '@pagerline/shared'
+import type { PairStartResponse, PairStatusResponse } from '@bouncer/shared'
 import { and, count, eq, gt, isNotNull, isNull, sql } from 'drizzle-orm'
 import { getDb, schema } from '@/db/client'
 import { audit } from './audit'
