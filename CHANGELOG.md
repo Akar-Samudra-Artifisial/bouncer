@@ -36,6 +36,9 @@ history is not repeated here.
 - Daily retention purge (`GET /api/cron/purge`, Vercel Cron, `CRON_SECRET`): alerts older than 7 days are deleted
   with their message text and AI label; the audit entry records counts only.
 
+### Changed
+- The glasses app now points at the production server `https://bouncer-nine.vercel.app` (network whitelist and packed build).
+
 ### Security
 - The bot token is scrubbed from provider error details (network errors, Telegram `description`) before audit/logging
   and is never part of API responses.

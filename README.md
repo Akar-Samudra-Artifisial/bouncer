@@ -71,7 +71,9 @@ with `ADMIN_SECRET`.
 
 Connect a real bot (after deploy): create a bot with @BotFather, add it to the group, then call
 `setWebhook` with `url=https://<server>/api/webhooks/telegram` and `secret_token=<TELEGRAM_WEBHOOK_SECRET>`.
-The production URL `https://bouncer.vercel.app` in `apps/glasses/app.json` is an assumption until deploy.
+Production server: `https://bouncer-nine.vercel.app` (whitelisted in `apps/glasses/app.json`, used by
+`pnpm --filter @bouncer/glasses pack`). The webhook is registered with
+`allowed_updates=["message","edited_message"]` and `drop_pending_updates=true`.
 
 ## Shared foundation
 
