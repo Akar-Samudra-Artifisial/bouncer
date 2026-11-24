@@ -399,6 +399,8 @@ function actionErrorTitle(err: unknown): string {
       return 'Not possible for this alert'
     case 429:
       return 'Too many requests, try later'
+    case 502:
+      return 'Telegram unavailable, try later'
     default:
       return `Error (HTTP ${err.status})`
   }

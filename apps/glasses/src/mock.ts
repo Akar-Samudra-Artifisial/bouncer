@@ -58,10 +58,30 @@ export const MOCK_ALERTS: Alert[] = [
     scope: 'Dev Meetup JKT',
     url: null,
     createdAt: ago(2),
-    target: { chatId: -1001000000002, messageId: 912, userId: 70003, chatTitle: 'Dev Meetup JKT' },
+    // messageId 9999…400: provider actions fail (like the server's dry-run simulation).
+    target: { chatId: -1001000000002, messageId: 9999400, userId: 70003, chatTitle: 'Dev Meetup JKT' },
+    actions: ['delete', 'mute', 'ban', 'dismiss'],
+  },
+  {
+    id: 'mock-4',
+    seq: 4,
+    source: 'telegram',
+    kind: 'telegram.link',
+    severity: 'medium',
+    status: 'open',
+    title: '@rina_mod: Meetup moved to Saturday → meet.example/hc',
+    summary: 'link — Meetup moved to Saturday → meet.example/hc',
+    scope: 'Hiking Club Bandung',
+    url: null,
+    createdAt: ago(1),
+    // Group admin: delete/mute/ban are refused with "cannot moderate admins".
+    target: { chatId: -1001000000001, messageId: 4240, userId: 70010, username: 'rina_mod', chatTitle: 'Hiking Club Bandung' },
     actions: ['delete', 'mute', 'ban', 'dismiss'],
   },
 ]
+
+/** Mock group admins (the server asks Telegram getChatMember). */
+const MOCK_ADMIN_IDS = new Set([70010])
 
 const MOCK_HEADLINE: Record<ActionKind, string> = {
   delete: 'Delete message',
@@ -116,6 +136,10 @@ export async function mockIntent(alertId: string, action: ActionKind): Promise<A
   const alert = MOCK_ALERTS.find((a) => a.id === alertId)
   if (!alert) throw new ApiError(404, 'alert not found')
   if (!alert.actions?.includes(action)) throw new ApiError(422, `${action} is not available for this alert`)
+  if (action === 'dismiss' && alert.status === 'resolved') throw new ApiError(422, 'alert is already closed')
+  if (action !== 'dismiss' && alert.target && MOCK_ADMIN_IDS.has(alert.target.userId)) {
+    throw new ApiError(422, 'cannot moderate admins')
+  }
   const requestId = `mock-req-${++mockSeq}`
   const nonce = `mock-nonce-${mockSeq}`
   const expiresAt = Date.now() + MOCK_TTL_MS
@@ -185,7 +209,22 @@ export async function mockConfirm(requestId: string, nonce: string): Promise<Act
   mockRequests.delete(requestId)
   if (Date.now() > req.expiresAt) throw new ApiError(410, 'action request expired')
   const alert = MOCK_ALERTS.find((a) => a.id === req.alertId)
-  if (alert) alert.status = 'resolved'
+  const simulated = req.action === 'dismiss' ? null : /^9999\d*([1-5]\d\d)$/.exec(String(alert?.target?.messageId ?? ''))
+  if (simulated) {
+    const status = Number(simulated[1])
+    return {
+      requestId,
+      alertId: req.alertId,
+      action: req.action,
+      status: 'failed',
+      message: `mock: Telegram rejected the request (${status})`,
+      providerStatus: status,
+      dryRun: true,
+      alertStatus: alert?.status ?? 'open',
+    }
+  }
+  // Same transitions as the server: mute → acked (message stays), the rest close the flag.
+  if (alert) alert.status = req.action === 'mute' ? 'acked' : 'resolved'
   return {
     requestId,
     alertId: req.alertId,

@@ -4,8 +4,9 @@ Heads-up **Telegram group moderation** HUD for **Even Realities G2** glasses. Re
 messages in your Telegram groups land on your glasses; you read them and act (delete, mute 1 hour, ban,
 dismiss) behind an explicit confirm step, without reaching for your phone.
 
-> **Status: work in progress (H1 of the hackathon plan).** Webhook ingest and the glasses inbox work;
-> Telegram moderation calls are dry-run only until H2. **Tested in the Even Hub simulator only**: the
+> **Status: work in progress (H2 of the hackathon plan).** Webhook ingest, the glasses inbox and the
+> Bot API moderation calls are implemented; delete/mute/ban were exercised in dry run only (one real
+> read-only `getChatMember` call was checked). **Tested in the Even Hub simulator only**: the
 > developer does not own G2 glasses, so real ring/touchpad input and the real G2 microphone are untested.
 
 ## What works now
@@ -21,10 +22,13 @@ dismiss) behind an explicit confirm step, without reaching for your phone.
 - **Privacy**: message text is capped at 500 characters; the raw update is never stored or returned.
 - **Glasses UI**: Inbox shows `@username: text`; Detail shows the flag reason, text and group name.
 - **Actions**: `delete | mute | ban | dismiss` through intent → Confirm (Cancel focused, one-time nonce) → result.
-  `dismiss` only closes the flag; the others succeed only with `ACTIONS_DRY_RUN=1` until H2.
+  `delete` → `deleteMessage` (already-deleted counts as done), `mute` → `restrictChatMember` with every
+  permission off for 1 hour (supergroups only), `ban` → `banChatMember`, `dismiss` closes the flag without
+  calling Telegram. At intent time `getChatMember` refuses group owners/admins (`422 cannot moderate admins`);
+  the chat allowlist is checked again at confirm. The bot token never reaches logs, audit or responses.
+  `ACTIONS_DRY_RUN=1` uses a fake provider (admins from `DRY_RUN_ADMIN_IDS`).
 
-Planned next (H2/H3): real Bot API calls (`deleteMessage`, `restrictChatMember`, `banChatMember`),
-voice phrases for mute/ban, on-demand AI summary, deploy.
+Planned next (H3): voice phrases for mute/ban, on-demand AI summary, deploy.
 
 ## Quick start (local)
 
@@ -41,7 +45,9 @@ pnpm seed --selftest                                 # also checks secret, allow
 ```
 
 The selftest needs `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_ALLOWED_CHATS`, `FLAG_KEYWORDS` (including
-`airdrop`), `ADMIN_SECRET` and `ACTIONS_DRY_RUN=1` in `apps/server/.env.local`.
+`airdrop`), `ADMIN_SECRET`, `ACTIONS_DRY_RUN=1`, `DRY_RUN_ADMIN_IDS=70099`, `ACTION_NONCE_TTL_SECONDS`
+(≤ 15, e.g. 8), a dummy `TELEGRAM_BOT_TOKEN` (checked for leaks) and the local `DATABASE_URL` in
+`apps/server/.env.local`.
 
 Glasses: `cp apps/glasses/.env.example apps/glasses/.env.local`, `pnpm dev:glasses`, then
 `pnpm --filter @bouncer/glasses simulate`. Leave `VITE_API_BASE` empty (or `VITE_MOCK=1`) to run offline on

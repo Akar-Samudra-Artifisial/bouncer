@@ -4,8 +4,18 @@ import { getDb, schema } from '@/db/client'
 import { audit } from './audit'
 import { randomSecret, sha256Hex } from './crypto'
 import { setAlertStatus } from './ingest'
-import { publicMessage, TELEGRAM_LABEL, telegramModerate, type ProviderOutcome } from './providers'
-import { allowedChats } from './telegram'
+import {
+  type MemberStatus,
+  moderationRequest,
+  networkFailure,
+  publicMessage,
+  scrubSecrets,
+  TELEGRAM_LABEL,
+  telegramMemberStatus,
+  telegramModerate,
+  type ProviderOutcome,
+} from './providers'
+import { allowedChats, csv } from './telegram'
 
 const RATE_WINDOW_MS = 10 * 60_000
 const RATE_LIMIT = 10
@@ -51,6 +61,10 @@ function checkMatrix(alert: AlertForAction, action: ActionKind): Check {
   }
   if (alert.source !== 'telegram') return { ok: false, status: 422, error: `${action} is only available for Telegram alerts` }
   if (!isTelegramTarget(alert.target)) return { ok: false, status: 422, error: 'alert has no Telegram message target' }
+  // restrictChatMember only works in supergroups (chat ids of the form -100…).
+  if (action === 'mute' && !String(alert.target.chatId).startsWith('-100')) {
+    return { ok: false, status: 422, error: 'mute needs a supergroup' }
+  }
   return { ok: true }
 }
 
@@ -93,7 +107,26 @@ function describe(alert: AlertForAction, action: ActionKind): Pick<ActionPreview
   }
 }
 
-export type IntentResult = { ok: true; preview: ActionPreview } | { ok: false; status: 403 | 404 | 422 | 429; error: string }
+export type IntentResult = { ok: true; preview: ActionPreview } | { ok: false; status: 403 | 404 | 422 | 429 | 502; error: string }
+
+type MemberCheck = { ok: true; status: MemberStatus } | { ok: false; outcome: ProviderOutcome }
+
+/** Dry-run getChatMember: user ids in `DRY_RUN_ADMIN_IDS` (csv) are administrators, everyone else a member. */
+function fakeMemberStatus(userId: number): MemberCheck {
+  return { ok: true, status: csv('DRY_RUN_ADMIN_IDS').includes(String(userId)) ? 'administrator' : 'member' }
+}
+
+/** Chat owners and admins are never moderated from the glasses (fails closed if Telegram cannot answer). */
+async function checkTargetMember(target: TelegramTarget): Promise<{ ok: true } | { ok: false; status: 422 | 502; error: string; detail?: string }> {
+  const member = isDryRun() ? fakeMemberStatus(target.userId) : await telegramMemberStatus(target.chatId, target.userId)
+  if (!member.ok) {
+    return { ok: false, status: 502, error: `could not check the target member: ${member.outcome.message}`, detail: member.outcome.detail }
+  }
+  if (member.status === 'creator' || member.status === 'administrator') {
+    return { ok: false, status: 422, error: 'cannot moderate admins' }
+  }
+  return { ok: true }
+}
 
 export async function createIntent(deviceId: string, alertId: string, action: ActionKind): Promise<IntentResult> {
   const db = getDb()
@@ -110,6 +143,19 @@ export async function createIntent(deviceId: string, alertId: string, action: Ac
   if (denied && !denied.ok) {
     await audit({ event: 'action.denied', actor, alertId, detail: { action, reason: denied.error } })
     return { ok: false, status: denied.status, error: denied.error }
+  }
+
+  if (action !== 'dismiss' && isTelegramTarget(alert.target)) {
+    const member = await checkTargetMember(alert.target)
+    if (!member.ok) {
+      await audit({
+        event: 'action.denied',
+        actor,
+        alertId,
+        detail: { action, reason: member.error, ...(member.detail ? { providerDetail: member.detail } : {}) },
+      })
+      return { ok: false, status: member.status, error: member.error }
+    }
   }
 
   const r = schema.actionRequests
@@ -156,11 +202,18 @@ export type ConfirmResult =
 /**
  * Dry-run stand-in for the provider. A message id that starts with `9999` and ends in an
  * HTTP status (e.g. `9999…400`) simulates that provider error, so the failure path is
- * testable without a bot token; anything else succeeds.
+ * testable without a bot token. A message id starting with `8888` simulates a network error whose
+ * raw text contains the request URL (with the bot token), exercising the same scrubbing as a real
+ * failure. Anything else succeeds.
  */
 function fakeProvider(action: ProviderAction, target: AlertTarget | null): ProviderOutcome {
   const label = TELEGRAM_LABEL[action]
   const id = isTelegramTarget(target) ? String(target.messageId) : ''
+  if (isTelegramTarget(target) && id.startsWith('8888')) {
+    const { method } = moderationRequest(action, target, Math.floor(Date.now() / 1000))
+    const token = process.env.TELEGRAM_BOT_TOKEN ?? '123456789:dry-run-placeholder-token'
+    return networkFailure(label, new Error(`connect ECONNREFUSED https://api.telegram.org/bot${token}/${method}`))
+  }
   const simulated = /^9999\d*([1-5]\d\d)$/.exec(id)
   if (simulated) {
     const status = Number(simulated[1])
@@ -246,18 +299,20 @@ export async function confirmIntent(deviceId: string, requestId: string, nonce: 
       } else {
         outcome = await runProvider(action, alert.target)
         if (outcome.ok) {
-          await setAlertStatus(alert.id, 'resolved')
-          alertStatus = 'resolved'
+          // Mute leaves the message in place (it can still be deleted): acked. Others close the flag.
+          alertStatus = action === 'mute' ? 'acked' : 'resolved'
+          await setAlertStatus(alert.id, alertStatus)
         }
       }
     }
     result = toResult(requestId, won.alertId, action, outcome, dryRun, alertStatus)
   } catch (err) {
-    console.error(`[bouncer] confirm ${requestId} failed:`, err instanceof Error ? err.message : err)
+    const reason = scrubSecrets(err instanceof Error ? err.message : String(err))
+    console.error(`[bouncer] confirm ${requestId} failed:`, reason)
     const message = outcome?.ok
       ? 'the provider accepted the action, but the server failed to record it'
       : 'internal error while running the action'
-    outcome = { ok: false, status: outcome?.status ?? null, message, detail: err instanceof Error ? err.message.slice(0, 200) : 'unknown error' }
+    outcome = { ok: false, status: outcome?.status ?? null, message, detail: reason }
     result = toResult(requestId, won.alertId, action, outcome, dryRun, alertStatus)
   } finally {
     const final = result ?? toResult(requestId, won.alertId, action, null, dryRun, alertStatus)

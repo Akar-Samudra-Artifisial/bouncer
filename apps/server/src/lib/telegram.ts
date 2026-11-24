@@ -12,7 +12,7 @@ import { type Json, num, obj, str } from './payload'
 export const TEXT_MAX = 500
 const TITLE_MAX = 140
 
-function csv(name: string): string[] {
+export function csv(name: string): string[] {
   return (process.env[name] ?? '')
     .split(',')
     .map((s) => s.trim())

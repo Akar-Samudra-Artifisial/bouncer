@@ -3,7 +3,12 @@
 //   pnpm seed --selftest   → also assert secret, allowlist, flag rules, dedup, truncation,
 //                            plus pairing + dry-run actions (needs ADMIN_SECRET and ACTIONS_DRY_RUN=1 on the server)
 // Server env needed: TELEGRAM_WEBHOOK_SECRET, TELEGRAM_ALLOWED_CHATS (first id is used here), FLAG_KEYWORDS (must include "airdrop").
-// TODO H2: voice + AI summary selftests (removed with the GitHub/Sentry fixtures).
+// Action selftest also needs: ACTIONS_DRY_RUN=1, DRY_RUN_ADMIN_IDS=70099, ACTION_NONCE_TTL_SECONDS ≤ 15,
+// a dummy TELEGRAM_BOT_TOKEN (checked for leaks) and DATABASE_URL (local DB, for the foreign-chat alert).
+// TODO H3: voice + AI summary selftests (removed with the GitHub/Sentry fixtures).
+
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 
 const SERVER = process.env.SERVER_URL ?? 'http://localhost:3300'
 const SECRET = process.env.TELEGRAM_WEBHOOK_SECRET
@@ -31,6 +36,8 @@ const users = {
   troll: { id: 70002, is_bot: false, first_name: 'Shouty', username: 'shouty_guy' },
   anon: { id: 70003, is_bot: false, first_name: 'Budi' },
   mod: { id: 70010, is_bot: false, first_name: 'Rina', username: 'rina_mod' },
+  // Group admin in the dry-run selftest: the server needs DRY_RUN_ADMIN_IDS=70099.
+  owner: { id: 70099, is_bot: false, first_name: 'Owner', username: 'group_owner' },
 }
 
 function message(from, text, { chat = CHAT, entities, reply } = {}) {
@@ -236,39 +243,165 @@ async function feedSelftest(ids) {
   const ownRows = [link.body.id, report.body.id, keyword.body.id, ids.long].map((id) => byId.get(id))
   check('raw update payload never exposed in the feed', ownRows.every((r) => r && !('payload' in r)), {})
 
-  // Dry-run actions: delete → succeeded + alert resolved; dismiss on the resolved alert → 422.
+  await actionSelftest(token, ids)
+
+  const audit = await api('GET', '/api/audit?limit=100', { token: ADMIN })
+  const events = new Set((audit.body?.entries ?? []).map((e) => e.event))
+  check(
+    'audit has webhook.telegram + action intent/confirm/succeeded/failed/denied events',
+    ['webhook.telegram', 'action.intent', 'action.confirm', 'action.succeeded', 'action.failed', 'action.denied'].every((e) => events.has(e)),
+    [...events],
+  )
+  const auditText = JSON.stringify(audit.body ?? '')
+  const botToken = process.env.TELEGRAM_BOT_TOKEN
+  check(
+    'bot token never appears in the audit log (scrubbed provider detail present)',
+    Boolean(botToken) && !auditText.includes(botToken) && !/bot\d+:/.test(auditText) && auditText.includes('<redacted>'),
+    { tokenSet: Boolean(botToken), redactedMarker: auditText.includes('<redacted>') },
+  )
+
+  const revoke = await api('POST', '/api/admin/devices/revoke', { token: ADMIN, body: { deviceId: paired.deviceId } })
+  const revokedRead = await api('GET', '/api/alerts', { token })
+  check('revoke device → reads 401', revoke.status === 200 && revokedRead.status === 401, { revoke: revoke.status, read: revokedRead.status })
+  // TODO H3: voice + AI summary selftests for Telegram alerts.
+}
+
+/** Fresh alert from one webhook update; returns its id. */
+async function flagged(msg) {
+  const r = await send({ update_id: updateId(), message: msg })
+  return r.status === 201 ? r.body.id : null
+}
+
+/** Alert in a chat outside the allowlist cannot come through the webhook: insert it directly (local DB only). */
+async function insertForeignAlert() {
+  const url = process.env.DATABASE_URL
+  if (!url) return null
+  const require = createRequire(new URL('../../apps/server/package.json', import.meta.url))
+  const { default: postgres } = await import(pathToFileURL(require.resolve('postgres')).href)
+  const sql = postgres(url, { max: 1, onnotice: () => {} })
+  try {
+    const mid = messageId()
+    const target = { chatId: OTHER_CHAT.id, messageId: mid, userId: users.spammer.id, username: users.spammer.username, chatTitle: OTHER_CHAT.title }
+    const [row] = await sql`
+      insert into alerts (source, delivery_id, dedup_key, kind, severity, title, summary, scope, payload, target)
+      values ('telegram', ${`selftest-${mid}`}, ${`msg:${OTHER_CHAT.id}:${mid}`}, 'telegram.link', 'medium',
+              '@cheap_followers: foreign chat', 'link — foreign chat', ${OTHER_CHAT.title}, ${sql.json({ selftest: true })}, ${sql.json(target)})
+      returning id`
+    return row.id
+  } finally {
+    await sql.end()
+  }
+}
+
+function confirmOf(token, intent, nonce = intent.body?.nonce) {
+  return api('POST', '/api/actions/confirm', { token, body: { requestId: intent.body?.requestId, nonce } })
+}
+
+async function actionSelftest(token, ids) {
+  // delete → succeeded, alert resolved.
   const intent = await api('POST', '/api/actions/intent', { token, body: { alertId: link.body.id, action: 'delete' } })
   check(
     'intent delete → 201 preview (dry run) with target',
     intent.status === 201 && intent.body.dryRun === true && intent.body.headline === 'Delete message' && intent.body.target.includes('@cheap_followers'),
     redact(intent),
   )
-  const confirm = await api('POST', '/api/actions/confirm', { token, body: { requestId: intent.body?.requestId, nonce: intent.body?.nonce } })
+  const confirm = await confirmOf(token, intent)
   check(
     'confirm delete → succeeded (dry run), alert resolved',
     confirm.status === 200 && confirm.body.status === 'succeeded' && confirm.body.alertStatus === 'resolved',
     confirm,
   )
+  const reused = await confirmOf(token, intent)
+  check('confirm with an already used nonce → 409', reused.status === 409, reused)
+
+  // mute → succeeded, alert acked (message stays); ban → succeeded, alert resolved.
+  const muteIntent = await api('POST', '/api/actions/intent', { token, body: { alertId: report.body.id, action: 'mute' } })
+  const muteBadNonce = await confirmOf(token, muteIntent, 'not-the-nonce')
+  check('confirm with a wrong nonce → 403', muteBadNonce.status === 403, muteBadNonce)
+  const mute = await confirmOf(token, muteIntent)
+  check(
+    'intent → confirm mute → succeeded (dry run), alert acked',
+    muteIntent.status === 201 && muteIntent.body.headline.startsWith('Mute') && mute.status === 200 && mute.body.status === 'succeeded' && mute.body.alertStatus === 'acked',
+    { intent: muteIntent.status, confirm: mute },
+  )
+  const banIntent = await api('POST', '/api/actions/intent', { token, body: { alertId: keyword.body.id, action: 'ban' } })
+  const ban = await confirmOf(token, banIntent)
+  check(
+    'intent → confirm ban → succeeded (dry run), alert resolved',
+    banIntent.status === 201 && ban.status === 200 && ban.body.status === 'succeeded' && ban.body.alertStatus === 'resolved',
+    { intent: banIntent.status, confirm: ban },
+  )
+
+  // dismiss: no provider; not allowed again on a resolved alert.
   const again = await api('POST', '/api/actions/intent', { token, body: { alertId: link.body.id, action: 'dismiss' } })
   check('dismiss on a resolved alert → 422', again.status === 422, again)
   const dismiss = await api('POST', '/api/actions/intent', { token, body: { alertId: ids.botReport, action: 'dismiss' } })
-  const dismissed = await api('POST', '/api/actions/confirm', { token, body: { requestId: dismiss.body?.requestId, nonce: dismiss.body?.nonce } })
+  const dismissed = await confirmOf(token, dismiss)
   check(
     'dismiss → succeeded without provider call, alert resolved',
     dismissed.status === 200 && dismissed.body.status === 'succeeded' && dismissed.body.providerStatus === null && dismissed.body.alertStatus === 'resolved',
     dismissed,
   )
+
   const badAction = await api('POST', '/api/actions/intent', { token, body: { alertId: report.body.id, action: 'rerun' } })
   check('unknown action → 400', badAction.status === 400, badAction)
 
-  const audit = await api('GET', '/api/audit?limit=50', { token: ADMIN })
-  const events = new Set((audit.body?.entries ?? []).map((e) => e.event))
-  check('audit has webhook.telegram + action events', ['webhook.telegram', 'action.intent', 'action.succeeded'].every((e) => events.has(e)), [...events])
+  // Target is a group admin (DRY_RUN_ADMIN_IDS stands in for getChatMember) → 422 at intent.
+  const adminAlert = await flagged(linkMessage(users.owner, 'Meetup moved, details https://example.com/meetup'))
+  const adminIntents = await Promise.all(
+    ['delete', 'mute', 'ban'].map((action) => api('POST', '/api/actions/intent', { token, body: { alertId: adminAlert, action } })),
+  )
+  check(
+    'delete/mute/ban on a group admin → 422 cannot moderate admins',
+    adminAlert !== null && adminIntents.every((r) => r.status === 422 && r.body.error === 'cannot moderate admins'),
+    adminIntents.map((r) => r.status),
+  )
 
-  const revoke = await api('POST', '/api/admin/devices/revoke', { token: ADMIN, body: { deviceId: paired.deviceId } })
-  const revokedRead = await api('GET', '/api/alerts', { token })
-  check('revoke device → reads 401', revoke.status === 200 && revokedRead.status === 401, { revoke: revoke.status, read: revokedRead.status })
-  // TODO H2: rate limits, nonce expiry, provider-failure path and voice/summary selftests for Telegram actions.
+  // Chat outside TELEGRAM_ALLOWED_CHATS → 403, and no actions offered.
+  const foreign = await insertForeignAlert().catch((err) => {
+    check('insert foreign-chat alert (local DB)', false, err.message)
+    return null
+  })
+  const foreignIntent = await api('POST', '/api/actions/intent', { token, body: { alertId: foreign, action: 'delete' } })
+  check('delete in a chat outside the allowlist → 403', foreign !== null && foreignIntent.status === 403, foreignIntent)
+
+  // Provider failure (dry-run simulation 9999…400) → failed, alert stays open.
+  const runTag = String(Date.now() % 1_000_000).padStart(6, '0')
+  const failAlert = await flagged({ ...linkMessage(users.spammer), message_id: Number(`9999${runTag}400`) })
+  const failIntent = await api('POST', '/api/actions/intent', { token, body: { alertId: failAlert, action: 'delete' } })
+  const fail = await confirmOf(token, failIntent)
+  check(
+    'provider error (simulated 400) → failed, providerStatus 400, alert still open',
+    fail.status === 200 && fail.body.status === 'failed' && fail.body.providerStatus === 400 && fail.body.alertStatus === 'open',
+    fail,
+  )
+
+  // Network error whose raw text contains the bot URL + token → scrubbed everywhere.
+  const netAlert = await flagged({ ...linkMessage(users.spammer), message_id: Number(`8888${runTag}`) })
+  const netIntent = await api('POST', '/api/actions/intent', { token, body: { alertId: netAlert, action: 'ban' } })
+  const net = await confirmOf(token, netIntent)
+  const botToken = process.env.TELEGRAM_BOT_TOKEN ?? ''
+  check(
+    'network error → failed, response has no bot token',
+    net.status === 200 && net.body.status === 'failed' && net.body.providerStatus === null && botToken !== '' && !JSON.stringify(net.body).includes(botToken),
+    net,
+  )
+
+  // Nonce expiry: wait past ACTION_NONCE_TTL_SECONDS → 410, then the same nonce stays unusable.
+  const ttl = Number(process.env.ACTION_NONCE_TTL_SECONDS ?? '60')
+  if (ttl > 15) {
+    check('ACTION_NONCE_TTL_SECONDS ≤ 15 for the expiry test', false, { ttl })
+  } else {
+    const expIntent = await api('POST', '/api/actions/intent', { token, body: { alertId: ids.long, action: 'delete' } })
+    await new Promise((resolve) => setTimeout(resolve, (ttl + 1) * 1000))
+    const expired = await confirmOf(token, expIntent)
+    const expiredAgain = await confirmOf(token, expIntent)
+    check('confirm after nonce TTL → 410 expired (twice)', expIntent.status === 201 && expired.status === 410 && expiredAgain.status === 410, {
+      intent: expIntent.status,
+      first: expired.status,
+      second: expiredAgain.status,
+    })
+  }
 }
 
 process.exit(failed ? 1 : 0)

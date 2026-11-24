@@ -14,7 +14,19 @@ history is not repeated here.
 - Only chats in `TELEGRAM_ALLOWED_CHATS` are processed; other updates answer `200 {ignored: true}`.
 - Dedup per `update_id` (redelivery) and per message (`msg:<chatId>:<messageId>`); message text is capped at 500 characters
   and the raw update is never stored.
-- Moderation actions `delete`, `mute`, `ban` (dry run only until the Bot API calls are wired) and `dismiss` (closes the flag).
+- Moderation actions call the Telegram Bot API: `delete` (deleteMessage; an already deleted message counts as done),
+  `mute` (restrictChatMember, all permissions off for 1 hour, supergroups only), `ban` (banChatMember); `dismiss`
+  closes the flag without calling Telegram. After success the alert is resolved (mute: acked, the message stays).
+- Group owners and admins cannot be moderated: the intent checks `getChatMember` and answers `422 cannot moderate admins`
+  (`502` when Telegram cannot be reached); the chat allowlist is re-checked at confirm.
+- `DRY_RUN_ADMIN_IDS` marks fake admins for `ACTIONS_DRY_RUN=1`.
+- Glasses action labels: Delete message / Mute 1h / Ban user / Dismiss; mock mode shows an admin refusal and a provider failure.
+- Selftest covers intent → confirm for every action, admin refusal, chats outside the allowlist, reused/wrong/expired nonces,
+  provider failure and bot-token scrubbing.
+
+### Security
+- The bot token is scrubbed from provider error details (network errors, Telegram `description`) before audit/logging
+  and is never part of API responses.
 - Glasses inbox/detail show Telegram flags (`@username: text`, group name); offline mock data uses fake Telegram messages.
 - Demo seed / selftest sends fake Telegram updates.
 

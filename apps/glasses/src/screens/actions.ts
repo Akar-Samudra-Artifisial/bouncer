@@ -7,9 +7,9 @@ const LINE = 52
 
 export const ACTION_LABEL: Record<ActionKind, string> = {
   delete: 'Delete message',
-  mute: 'Mute user 1 hour',
+  mute: 'Mute 1h',
   ban: 'Ban user',
-  dismiss: 'Dismiss flag',
+  dismiss: 'Dismiss',
 }
 
 // ---- actions list: row 0 = Back, rows 1..n = alert.actions ----------------
