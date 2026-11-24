@@ -23,8 +23,10 @@ export const alerts = pgTable(
     payload: jsonb('payload').notNull(),
     /** Structured provider target for actions (`{chatId, messageId, userId, username?, chatTitle?}`); null = no action target. */
     target: jsonb('target').$type<AlertTarget>(),
-    /** Cached AI summary (≤ 240 chars, plain text); null until first generated. */
+    /** Cached AI risk reason (≤ 200 chars, plain text); null until first generated. */
     aiSummary: text('ai_summary'),
+    /** Cached AI risk label (`spam|scam|toxic|ok|unclear`), set together with `aiSummary`. */
+    aiLabel: text('ai_label'),
     aiSummaryAt: timestamp('ai_summary_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },

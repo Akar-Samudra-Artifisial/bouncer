@@ -177,10 +177,19 @@ export interface VoiceResponse {
 
 export type SummarySource = 'ai' | 'cache' | 'fallback'
 
+/**
+ * Advisory risk label from the AI (on demand, when Detail opens). It is display-only:
+ * the server's action matrix alone decides `Alert.actions`.
+ */
+export const RISK_LABELS = ['spam', 'scam', 'toxic', 'ok', 'unclear'] as const
+export type RiskLabel = (typeof RISK_LABELS)[number]
+
 /** `POST /api/alerts/{id}/summary[?refresh=1]` 200 response. */
 export interface SummaryResponse {
   alertId: string
-  /** Plain text, ≤ 240 characters. */
+  /** `unclear` whenever the AI is off, unavailable, or its output failed validation. */
+  label: RiskLabel
+  /** Why the label was given: plain text, ≤ 200 characters. */
   summary: string
   /** `ai` = generated now, `cache` = stored AI summary, `fallback` = heuristic (AI unavailable). */
   source: SummarySource

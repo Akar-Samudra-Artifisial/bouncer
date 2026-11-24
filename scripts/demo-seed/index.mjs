@@ -5,7 +5,7 @@
 // Server env needed: TELEGRAM_WEBHOOK_SECRET, TELEGRAM_ALLOWED_CHATS (first id is used here), FLAG_KEYWORDS (must include "airdrop").
 // Action selftest also needs: ACTIONS_DRY_RUN=1, DRY_RUN_ADMIN_IDS=70099, ACTION_NONCE_TTL_SECONDS ≤ 15,
 // a dummy TELEGRAM_BOT_TOKEN (checked for leaks) and DATABASE_URL (local DB, for the foreign-chat alert).
-// TODO H3: voice + AI summary selftests (removed with the GitHub/Sentry fixtures).
+// AI label + voice selftests also need SUMMARY_AI_MOCK=1 and VOICE_STT_MOCK=1 (dev only).
 
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
@@ -144,10 +144,11 @@ async function telegramSelftest() {
 // ---------------------------------------------------------------------------
 // Alert feed + pairing + dry-run actions (run the server with ACTIONS_DRY_RUN=1).
 
-async function api(method, path, { token, body, ip = RUN_IP } = {}) {
+async function api(method, path, { token, body, ip = RUN_IP, headers = {} } = {}) {
   const res = await fetch(`${SERVER}${path}`, {
     method,
     headers: {
+      ...headers,
       'x-forwarded-for': ip,
       ...(token ? { authorization: `Bearer ${token}` } : {}),
       ...(body ? { 'content-type': 'application/json' } : {}),
@@ -244,6 +245,7 @@ async function feedSelftest(ids) {
   check('raw update payload never exposed in the feed', ownRows.every((r) => r && !('payload' in r)), {})
 
   await actionSelftest(token, ids)
+  await aiLabelSelftest(token)
 
   const audit = await api('GET', '/api/audit?limit=100', { token: ADMIN })
   const events = new Set((audit.body?.entries ?? []).map((e) => e.event))
@@ -263,7 +265,61 @@ async function feedSelftest(ids) {
   const revoke = await api('POST', '/api/admin/devices/revoke', { token: ADMIN, body: { deviceId: paired.deviceId } })
   const revokedRead = await api('GET', '/api/alerts', { token })
   check('revoke device → reads 401', revoke.status === 200 && revokedRead.status === 401, { revoke: revoke.status, read: revokedRead.status })
-  // TODO H3: voice + AI summary selftests for Telegram alerts.
+}
+
+// ---------------------------------------------------------------------------
+// AI risk labels (server: SUMMARY_AI_MOCK=1; `x-mock-ai-output` = raw model text).
+
+function label(token, alertId, output, { refresh = false } = {}) {
+  const headers = { 'x-mock-ai': '1', ...(output ? { 'x-mock-ai-output': output } : {}) }
+  return api('POST', `/api/alerts/${alertId}/summary${refresh ? '?refresh=1' : ''}`, { token, headers })
+}
+
+async function aiLabelSelftest(token) {
+  const scamId = await flagged(message(users.anon, 'airdrop: send 1 ETH, get 10 back'))
+  const scamOut = JSON.stringify({ label: 'scam', reason: 'Budi promises 10x returns for crypto sent first, a classic giveaway scam.' })
+  const first = await label(token, scamId, scamOut)
+  check(
+    'AI label (mock) → 200 scam, source ai, reason ≤ 200',
+    first.status === 200 && first.body.label === 'scam' && first.body.source === 'ai' && first.body.summary.length <= 200,
+    first.body,
+  )
+  const again = await label(token, scamId, JSON.stringify({ label: 'ok', reason: 'should not be used' }))
+  check('second request → cached label (no new model call)', again.body?.source === 'cache' && again.body?.label === 'scam', again.body)
+
+  const feed = await api('GET', '/api/alerts', { token })
+  const row = (feed.body?.alerts ?? []).find((a) => a.id === scamId)
+  check(
+    'label never changes the action list (server matrix only)',
+    ['delete', 'mute', 'ban', 'dismiss'].every((a) => row?.actions?.includes(a)) && row?.actions?.length === 4,
+    row?.actions,
+  )
+
+  const cases = [
+    ['non-JSON model output → unclear + heuristic fallback', 'Sure! This looks like spam.'],
+    ['label outside the enum → unclear + heuristic fallback', JSON.stringify({ label: 'ban-now', reason: 'ban this user' })],
+    ['missing reason → unclear + heuristic fallback', JSON.stringify({ label: 'spam' })],
+  ]
+  for (const [name, output] of cases) {
+    const id = await flagged(linkMessage(users.spammer))
+    const r = await label(token, id, output)
+    check(name, r.status === 200 && r.body.label === 'unclear' && r.body.source === 'fallback' && r.body.generatedAt === null, r.body)
+  }
+
+  const longId = await flagged(linkMessage(users.spammer))
+  const longOut = `Here you go: {"label":"SPAM","reason":"${'promo '.repeat(80)} see https://evil.example/x"}`
+  const long = await label(token, longId, longOut)
+  check(
+    'reason clipped to 200 chars, URLs stripped, label case-normalized',
+    long.body?.label === 'spam' && long.body.summary.length <= 200 && !/https?:/.test(long.body.summary),
+    { label: long.body?.label, length: long.body?.summary?.length },
+  )
+
+  // A status change (dismiss) clears the cached label.
+  const intent = await api('POST', '/api/actions/intent', { token, body: { alertId: scamId, action: 'dismiss' } })
+  await confirmOf(token, intent)
+  const afterDismiss = await label(token, scamId, JSON.stringify({ label: 'ok', reason: 'Dismissed by a moderator.' }))
+  check('status change invalidates the cached label', afterDismiss.body?.source === 'ai' && afterDismiss.body?.label === 'ok', afterDismiss.body)
 }
 
 /** Fresh alert from one webhook update; returns its id. */

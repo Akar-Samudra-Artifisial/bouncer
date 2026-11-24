@@ -53,7 +53,7 @@ async function setStatusLocked(tx: Tx, alertId: string, status: AlertStatus): Pr
   const [row] = await tx
     .update(a)
     // A cached AI summary describes the old status: drop it so the next request regenerates.
-    .set({ status, seq: nextSeq, aiSummary: null, aiSummaryAt: null })
+    .set({ status, seq: nextSeq, aiSummary: null, aiLabel: null, aiSummaryAt: null })
     .where(and(eq(a.id, alertId), ne(a.status, status)))
     .returning({ seq: a.seq })
   return row?.seq ?? null

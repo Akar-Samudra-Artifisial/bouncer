@@ -545,7 +545,7 @@ function loadSummary(alertId: string, refresh = false): void {
   fetchSummary(alertId, refresh).then(
     (res) => {
       if (stale()) return
-      state.summaries.set(alertId, { kind: 'ready', text: res.summary, source: res.source })
+      state.summaries.set(alertId, { kind: 'ready', label: res.label, text: res.summary, source: res.source })
       updateDetailBody(alertId)
     },
     (err: unknown) => {

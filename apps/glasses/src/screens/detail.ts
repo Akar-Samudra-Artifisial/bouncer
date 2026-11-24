@@ -1,23 +1,23 @@
-import type { Alert, SummarySource } from '@bouncer/shared'
+import type { Alert, RiskLabel, SummarySource } from '@bouncer/shared'
 import { TextContainerProperty } from '@evenrealities/even_hub_sdk'
 import { DETAIL_BODY, DETAIL_FOOTER, FOOTER_H, HEADER_H, MAX_TEXT_CHARS, SCREEN_H, SCREEN_W } from '../ids'
 import { ago, clip, sevTag } from './format'
 import { header, type Page } from './layout'
 
-/** AI summary of the alert on screen, loaded separately from the alert itself. */
+/** AI risk label of the alert on screen, loaded separately (on demand) from the alert itself. */
 export type SummaryView =
   | { kind: 'loading' }
   /** `note`: short status next to an existing text, e.g. "refreshing…" or a failed refresh. */
-  | { kind: 'ready'; text: string; source: SummarySource; note?: string }
+  | { kind: 'ready'; label: RiskLabel; text: string; source: SummarySource; note?: string }
   | { kind: 'error'; message: string }
 
-const SOURCE_LABEL: Record<SummarySource, string> = { ai: 'AI', cache: 'cached', fallback: 'fallback' }
+const SOURCE_LABEL: Record<SummarySource, string> = { ai: 'AI', cache: 'AI, cached', fallback: 'no AI' }
 
 function summaryLines(s: SummaryView | undefined): string[] {
-  if (!s || s.kind === 'loading') return ['Summary: Summarizing…']
-  if (s.kind === 'error') return [`Summary unavailable (${clip(s.message, 60)})`]
+  if (!s || s.kind === 'loading') return ['Risk: checking…']
+  if (s.kind === 'error') return [`Risk unavailable (${clip(s.message, 60)})`]
   const note = s.note ? ` · ${clip(s.note, 40)}` : ''
-  return [`Summary [${SOURCE_LABEL[s.source]}]${note}:`, clip(s.text, 240)]
+  return [`Risk: ${s.label.toUpperCase()} [${SOURCE_LABEL[s.source]}]${note}`, clip(s.text, 200)]
 }
 
 export function detailBody(a: Alert, summary?: SummaryView): string {

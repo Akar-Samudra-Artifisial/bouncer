@@ -5,6 +5,7 @@ import type {
   Alert,
   PairStartResponse,
   PairStatusResponse,
+  RiskLabel,
   SummaryResponse,
   VoiceIntent,
   VoiceResponse,
@@ -189,6 +190,7 @@ export async function mockVoice(alertId: string): Promise<VoiceResponse> {
 }
 
 const mockSummaryAt = new Map<string, string>()
+const MOCK_LABELS: Record<string, RiskLabel> = { 'mock-1': 'spam', 'mock-2': 'toxic', 'mock-3': 'scam', 'mock-4': 'ok' }
 
 export async function mockSummary(alertId: string, refresh: boolean): Promise<SummaryResponse> {
   await delay(900)
@@ -197,8 +199,9 @@ export async function mockSummary(alertId: string, refresh: boolean): Promise<Su
   const cached = mockSummaryAt.get(alertId)
   const generatedAt = !cached || refresh ? new Date().toISOString() : cached
   mockSummaryAt.set(alertId, generatedAt)
-  const summary = `Mock summary: ${alert.title}. ${alert.summary}`.slice(0, 240)
-  return { alertId, summary, source: cached && !refresh ? 'cache' : 'ai', generatedAt }
+  const label = MOCK_LABELS[alertId] ?? 'unclear'
+  const summary = `Mock label: ${alert.title}`.slice(0, 200)
+  return { alertId, label, summary, source: cached && !refresh ? 'cache' : 'ai', generatedAt }
 }
 
 export async function mockConfirm(requestId: string, nonce: string): Promise<ActionConfirmResult> {
