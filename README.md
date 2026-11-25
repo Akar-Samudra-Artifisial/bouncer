@@ -1,3 +1,5 @@
+<img src="assets/brand/bouncer-icon.svg" width="96" alt="Bouncer logo">
+
 # Bouncer
 
 Heads-up **Telegram group moderation** HUD for **Even Realities G2** glasses. Reported or suspicious
@@ -6,8 +8,9 @@ dismiss) behind an explicit confirm step, without reaching for your phone.
 
 > **Status: hackathon MVP.** Webhook ingest, the glasses inbox, Bot API moderation, AI risk labels,
 > voice commands, Telegram DM pairing and the retention purge are implemented. delete/mute/ban were
-> exercised in dry run only (one real read-only `getChatMember` call was checked; no second Telegram
-> account was available to moderate). **Tested in the Even Hub simulator only**: the developer does not
+> exercised end to end against the production deployment on a real test supergroup with a second
+> Telegram account (the admin guard rejected actions on the owner; the banned account was restored
+> afterwards). **Tested in the Even Hub simulator only**: the developer does not
 > own G2 glasses, so real ring/touchpad input and the real G2 microphone are untested.
 
 ## What works now
