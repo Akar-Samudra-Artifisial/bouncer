@@ -247,11 +247,13 @@ async function feedSelftest(ids) {
 
   await actionSelftest(token, ids)
   await aiLabelSelftest(token)
+  await cancelSelftest(ADMIN)
   await voiceSelftest(ADMIN)
   await telegramPairSelftest(ADMIN)
   await purgeSelftest()
 
-  const audit = await api('GET', '/api/audit?limit=100', { token: ADMIN })
+  // Max page (200): the confirm-path action.denied entries are older than the last 100 events.
+  const audit = await api('GET', '/api/audit?limit=200', { token: ADMIN })
   const events = new Set((audit.body?.entries ?? []).map((e) => e.event))
   check(
     'audit has webhook.telegram + action intent/confirm/succeeded/failed/denied events',
@@ -352,6 +354,42 @@ function voiceCases() {
   ]
 }
 
+async function cancelSelftest(adminSecret) {
+  // Own device + IP: the intent rate limit (10 / 10 min) is per device.
+  const ip = randomIp()
+  const start = await api('POST', '/api/pair/start', { ip })
+  await api('POST', '/api/admin/pair/approve', { token: adminSecret, body: { code: start.body?.code, name: 'selftest cancel' }, ip })
+  const status = await api('GET', '/api/pair/status', { token: start.body?.pollSecret, ip })
+  const token = status.body?.token
+  const alertId = await flagged(linkMessage(users.spammer))
+  const intent = await api('POST', '/api/actions/intent', { token, body: { alertId, action: 'ban' }, ip })
+  const cancel = (body) => api('POST', '/api/actions/cancel', { token, body, ip })
+  const wrongNonce = await cancel({ requestId: intent.body?.requestId, nonce: 'not-the-nonce' })
+  const cancelled = await cancel({ requestId: intent.body?.requestId, nonce: intent.body?.nonce })
+  const again = await cancel({ requestId: intent.body?.requestId, nonce: intent.body?.nonce })
+  const confirmAfter = await api('POST', '/api/actions/confirm', { token, body: { requestId: intent.body?.requestId, nonce: intent.body?.nonce }, ip })
+  check(
+    'cancel on Confirm → 200; wrong nonce 403; second cancel 409; confirm after cancel refused',
+    intent.status === 201 && wrongNonce.status === 403 && cancelled.status === 200 && again.status === 409 && confirmAfter.status !== 200,
+    { intent: intent.status, wrongNonce: wrongNonce.status, cancel: cancelled.status, again: again.status, confirm: confirmAfter.status },
+  )
+  const audit = await api('GET', '/api/audit?limit=50', { token: adminSecret })
+  const entry = (audit.body?.entries ?? []).find((e) => e.event === 'action.cancel' && e.detail?.requestId === intent.body?.requestId)
+  const feed = await api('GET', '/api/alerts', { token, ip })
+  const row = (feed.body?.alerts ?? []).find((a) => a.id === alertId)
+  check(
+    'audit action.cancel by the device (requestId + action, no message text); alert stays open',
+    entry?.actor === `device:${status.body?.deviceId}` &&
+      entry.detail?.action === 'ban' &&
+      !JSON.stringify(entry.detail).includes('Grow your channel') &&
+      row?.status === 'open',
+    { actor: entry?.actor, detail: entry?.detail, alertStatus: row?.status },
+  )
+  const badNonceEntries = (audit.body?.entries ?? []).filter((e) => e.event === 'action.denied' && e.detail?.requestId === intent.body?.requestId)
+  check('cancel with a wrong nonce → 403 only, no audit entry (no log flooding)', badNonceEntries.length === 0, badNonceEntries)
+  if (status.body?.deviceId) await api('POST', '/api/admin/devices/revoke', { token: adminSecret, body: { deviceId: status.body.deviceId } })
+}
+
 async function voiceSelftest(adminSecret) {
   // Own device + IP: the voice quota (20 / 10 min) is per device.
   const ip = randomIp()
@@ -422,6 +460,38 @@ async function aiLabelSelftest(token) {
     long.body?.label === 'spam' && long.body.summary.length <= 200 && !/https?:/.test(long.body.summary),
     { label: long.body?.label, length: long.body?.summary?.length },
   )
+
+  // Realistic model output that must pass validation (E2E: 3 of 4 labels fell back to "unclear").
+  const tolerated = [
+    // (HTTP header values cannot hold newlines; tabs/spaces stand in for them.)
+    ['code fence + whitespace', '```json\t{ "label": " Scam ", "reason": "Budi promises 10x crypto returns." }\t```', 'scam'],
+    ['upper-case label + extra fields', JSON.stringify({ label: 'TOXIC', reason: 'Insults the group.', confidence: 0.9, action: 'ban' }), 'toxic'],
+    ['prose with braces after the JSON', '{"label":"ok","reason":"Harmless meeting note."}  Note: {none}', 'ok'],
+    ['cut off mid-reason (max_tokens)', '{"label": "scam", "reason": "Budi posted a free airdrop promo urging people to click a link in his bio', 'scam'],
+    ['invalid first object, valid second', '{"label":"maybe","reason":"draft"} then {"label":"spam","reason":"Promo link from a new account."}', 'spam'],
+    ['first object without reason, valid second', '{"label":"spam"} {"label":"toxic","reason":"Insults a member."}', 'toxic'],
+  ]
+  const wrongParse = []
+  for (const [name, output, expected] of tolerated) {
+    const r = await label(token, await flagged(linkMessage(users.spammer)), output)
+    const ok = r.status === 200 && r.body?.source === 'ai' && r.body?.label === expected && r.body.summary.length <= 200 && !/[`{}]/.test(r.body.summary)
+    if (!ok) wrongParse.push({ name, got: r.body })
+  }
+  check(`AI label parser tolerates ${tolerated.length} realistic outputs (fence, case, extra fields, truncation)`, wrongParse.length === 0, wrongParse)
+  // Control / zero-width / bidi chars and <>& are dropped from the reason. JSON escapes keep the
+  // header ASCII; JSON.parse on the server turns them into the real characters.
+  const unsafeOut = '{"label":"scam","reason":"Bell\\u0007 zero\\u200bwidth\\ufeff bidi\\u202eevil\\u2066x\\u2069 <b>tag</b> & co\\u0000."}'
+  const unsafe = await label(token, await flagged(linkMessage(users.spammer)), unsafeOut)
+  check(
+    'reason drops control, zero-width, bidi and <>& characters',
+    unsafe.body?.label === 'scam' &&
+      typeof unsafe.body.summary === 'string' &&
+      !/[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁠-⁤⁦-⁩﻿<>&]/.test(unsafe.body.summary) &&
+      unsafe.body.summary.includes('zerowidth'),
+    unsafe.body?.summary,
+  )
+  const cutLabel = await label(token, await flagged(linkMessage(users.spammer)), '{"label": "spam", "rea')
+  check('truncated before any reason → unclear + heuristic fallback', cutLabel.body?.label === 'unclear' && cutLabel.body?.source === 'fallback', cutLabel.body)
 
   // A status change (dismiss) clears the cached label.
   const intent = await api('POST', '/api/actions/intent', { token, body: { alertId: scamId, action: 'dismiss' } })
