@@ -1,7 +1,10 @@
 export default function Home() {
   return (
     <main style={{ fontFamily: 'system-ui', padding: 24 }}>
-      <h1>Bouncer server</h1>
+      <h1 style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <img src="/bouncer-icon.svg" alt="" width={40} height={40} />
+        Bouncer server
+      </h1>
       <p>Telegram group moderation feed for the Bouncer G2 glasses app.</p>
       <ul>
         <li>POST /api/webhooks/telegram (X-Telegram-Bot-Api-Secret-Token)</li>
