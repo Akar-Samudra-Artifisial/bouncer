@@ -343,6 +343,38 @@ export async function confirmIntent(deviceId: string, requestId: string, nonce: 
   return { ok: true, result }
 }
 
+export type CancelResult = { ok: true } | { ok: false; status: 403 | 404 | 409; error: string }
+
+/**
+ * Cancel on the Confirm screen: burns the pending request (status `expired`, so its nonce can never
+ * be confirmed) and records `action.cancel`. Needs the same one-time nonce as confirm.
+ */
+export async function cancelIntent(deviceId: string, requestId: string, nonce: string): Promise<CancelResult> {
+  const db = getDb()
+  const r = schema.actionRequests
+  const actor = `device:${deviceId}`
+  const nonceHash = sha256Hex(nonce)
+  const [won] = await db
+    .update(r)
+    .set({ status: 'expired' })
+    .where(and(eq(r.id, requestId), eq(r.deviceId, deviceId), eq(r.nonceHash, nonceHash), eq(r.status, 'pending')))
+    .returning({ alertId: r.alertId, action: r.action })
+  if (won) {
+    await audit({ event: 'action.cancel', actor, alertId: won.alertId, detail: { requestId, action: won.action } })
+    return { ok: true }
+  }
+  const [row] = await db
+    .select({ status: r.status, nonceHash: r.nonceHash })
+    .from(r)
+    .where(and(eq(r.id, requestId), eq(r.deviceId, deviceId)))
+    .limit(1)
+  if (!row) return { ok: false, status: 404, error: 'action request not found' }
+  // Bad nonce: plain 403, not audited (cancel changes nothing, and an unbounded retry loop must not
+  // flood the audit log). Bad nonces on confirm are still audited there.
+  if (row.nonceHash !== nonceHash) return { ok: false, status: 403, error: 'invalid nonce' }
+  return { ok: false, status: 409, error: `action request already ${row.status}` }
+}
+
 function toResult(
   requestId: string,
   alertId: string,
