@@ -35,14 +35,28 @@ history is not repeated here.
   `ADMIN_SECRET` remains as a fallback.
 - Daily retention purge (`GET /api/cron/purge`, Vercel Cron, `CRON_SECRET`): alerts older than 7 days are deleted
   with their message text and AI label; the audit entry records counts only.
+- `POST /api/actions/cancel` (`{requestId, nonce}`): Cancel on the glasses Confirm screen burns the pending request and
+  records `action.cancel` in the audit log (request id + action, no message text).
 
 ### Changed
 - The glasses app now points at the production server `https://bouncer-nine.vercel.app` (network whitelist and packed build).
+- Glasses inbox lists open alerts only (acked/resolved/muted drop out; they stay in the audit log) and is rebuilt when
+  its rows change (new or closed alert) instead of only updating the header count.
+
+### Fixed
+- AI risk labels mostly fell back to `unclear` ("model output failed validation"): the model sometimes opened with a
+  thinking block that used up the 150-token budget, cutting the JSON off. Thinking is now disabled, the budget is 400
+  tokens, and the parser accepts code fences, surrounding prose, extra fields and a reason cut off mid-sentence (label
+  still restricted to the enum, reason still sanitized and ≤ 200 characters). When the output holds several JSON
+  objects, the first one with a valid label and reason is used.
+- The header clock no longer freezes while the pairing code is shown.
 
 ### Security
 - The bot token is scrubbed from provider error details (network errors, Telegram `description`) before audit/logging
   and is never part of API responses.
 - Flagged message text is sent to Anthropic only when a moderator opens the alert, wrapped as untrusted data, without tools.
+- AI label reasons drop control, zero-width and bidi characters and `<>&`.
+- Cancel with a wrong nonce returns 403 without an audit entry, so retries cannot flood the audit log.
 
 ### Removed
 - GitHub and Sentry webhooks, providers and actions (`rerun`, `resolve`) inherited from the Pagerline base.
