@@ -6,9 +6,12 @@ import { header, type Page } from './layout'
 
 export const BACK_ITEM = '< Back'
 
-/** Alerts shown in the list (item 0 is always "Back"). */
+/**
+ * Alerts shown in the list (item 0 is always "Back"): open ones only. Acked/resolved/muted
+ * alerts drop out of the list (they stay in the server audit log).
+ */
 export function inboxAlerts(alertsNewestFirst: Alert[]): Alert[] {
-  return alertsNewestFirst.slice(0, MAX_LIST_ITEMS - 1)
+  return alertsNewestFirst.filter((a) => a.status === 'open').slice(0, MAX_LIST_ITEMS - 1)
 }
 
 function itemLabel(a: Alert): string {

@@ -205,6 +205,10 @@ export async function mockSummary(alertId: string, refresh: boolean): Promise<Su
   return { alertId, label, summary, source: cached && !refresh ? 'cache' : 'ai', generatedAt }
 }
 
+export function mockCancel(requestId: string): void {
+  mockRequests.delete(requestId)
+}
+
 export async function mockConfirm(requestId: string, nonce: string): Promise<ActionConfirmResult> {
   await delay(600)
   const req = mockRequests.get(requestId)

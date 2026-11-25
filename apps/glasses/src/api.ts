@@ -12,6 +12,7 @@ import type {
 import { ApiError } from './errors'
 import {
   MOCK_ALERTS,
+  mockCancel,
   mockConfirm,
   mockIntent,
   mockPairStart,
@@ -120,6 +121,12 @@ export function createIntent(alertId: string, action: ActionKind): Promise<Actio
 export function confirmAction(requestId: string, nonce: string): Promise<ActionConfirmResult> {
   if (isMock()) return mockConfirm(requestId, nonce)
   return request<ActionConfirmResult>('POST', '/api/actions/confirm', deviceToken, { requestId, nonce })
+}
+
+/** Cancel on the Confirm screen: burns the nonce and records `action.cancel` in the audit log. */
+export async function cancelAction(requestId: string, nonce: string): Promise<void> {
+  if (isMock()) return mockCancel(requestId)
+  await request<{ cancelled: boolean }>('POST', '/api/actions/cancel', deviceToken, { requestId, nonce })
 }
 
 /** Recorded audio ready for upload: raw PCM s16le mono, or a browser container (webm/ogg/mp4). */

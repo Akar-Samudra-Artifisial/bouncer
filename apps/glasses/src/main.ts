@@ -2,6 +2,7 @@ import type { ActionKind, ActionPreview, Alert, VoiceIntent } from '@bouncer/sha
 import { waitForEvenAppBridge } from '@evenrealities/even_hub_sdk'
 import {
   ApiError,
+  cancelAction,
   confirmAction,
   createIntent,
   fetchAlerts,
@@ -77,9 +78,9 @@ const state = {
   error: null as string | null,
   /**
    * Alert ids in the order the inbox list was last built (row i+1 → inboxIds[i]).
-   * The SDK cannot set a list's selected row, so rebuilding would jump the
-   * selection back to row 0; instead the list stays frozen while it is on screen
-   * and new alerts are announced in the header until the inbox is re-entered.
+   * The SDK cannot set a list's selected row, so a rebuild jumps the selection
+   * back to row 0; the list is therefore rebuilt only when its rows change
+   * (new alert, or one closed), not on every poll.
    */
   inboxIds: [] as string[],
   /** An intent request is in flight (actions screen ignores input meanwhile). */
@@ -246,8 +247,17 @@ function trimAlerts(): void {
 function refresh(updated: ReadonlySet<string>): void {
   const s = state.screen
   if (s.name === 'pair') return
-  // Idle and an open Detail are patched in place. Lists are never rebuilt (that
-  // would reset the selected row); the inbox header shows "+N new" instead.
+  // The inbox list is rebuilt only when its rows changed (a rebuild resets the
+  // selected row to "Back"); otherwise just the header is patched.
+  if (s.name === 'inbox') {
+    const ids = inboxAlerts(newestFirst()).map((a) => a.id)
+    if (ids.length !== state.inboxIds.length || ids.some((id, i) => id !== state.inboxIds[i])) {
+      render().catch((err: unknown) => console.error(err))
+      mirror()
+      return
+    }
+  }
+  // Idle and an open Detail are patched in place.
   const tasks: Promise<void>[] = [renderer.upgrade(HEADER, header())]
   if (updated.size > 0 && s.name === 'idle') tasks.push(renderer.upgrade(IDLE_BODY, idleBody(newestFirst())))
   if (s.name === 'detail' && updated.has(s.alertId)) {
@@ -283,7 +293,10 @@ function showPair(view: PairView): void {
   const sameLayout = wasPair && state.pair.phase === view.phase
   state.pair = view
   if (sameLayout) {
-    renderer.upgrade(PAIR_BODY, pairBody(view)).catch((err: unknown) => console.error(err))
+    // Header too: its clock would otherwise freeze while the pair code is shown.
+    Promise.all([renderer.upgrade(HEADER, header()), renderer.upgrade(PAIR_BODY, pairBody(view))]).catch((err: unknown) =>
+      console.error(err),
+    )
     mirror()
   } else {
     go({ name: 'pair' })
@@ -882,7 +895,11 @@ function onGesture(g: Gesture): void {
       if (s.phase === 'sending') return // locked while the confirm request runs
       if (s.phase === 'expired') return // notice is showing; it returns on its own
       if (g.type === 'click' && g.listIndex === 1) void sendConfirm(s)
-      else if ((g.type === 'click' && g.listIndex === 0) || g.type === 'double_click') backToActions(s.alertId)
+      else if ((g.type === 'click' && g.listIndex === 0) || g.type === 'double_click') {
+        // Fire-and-forget: the server burns the nonce and audits the cancel; navigation never waits.
+        cancelAction(s.preview.requestId, s.preview.nonce).catch((err: unknown) => console.error('[bouncer] cancel not recorded:', err))
+        backToActions(s.alertId)
+      }
       // Scrolls move the native selection between Cancel and Confirm.
       return
 
